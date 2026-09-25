@@ -1,15 +1,59 @@
+import { useState } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { subjects, studentAverage } from "../data/students.js";
 
-export default function AcademicPerformance({ currentStudent }) {
+export default function AcademicPerformance({ currentStudent, setCurrentStudent }) {
   const me = currentStudent;
   const chartData = subjects.map((subject) => ({ subject, current: me.grades[subject], previous: me.previousGrades[subject] }));
   const values = Object.values(me.grades);
   const averageChange = studentAverage(me) - Object.values(me.previousGrades).reduce((a, b) => a + b, 0) / subjects.length;
 
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ subject: subjects[0], grade: "" });
+
+  const updateGrade = (event) => {
+    event.preventDefault();
+    const grade = Number(form.grade);
+    if (!form.subject || Number.isNaN(grade) || grade < 0 || grade > 100) return;
+
+    setCurrentStudent((student) => ({
+      ...student,
+      previousGrades: { ...student.previousGrades, [form.subject]: student.grades[form.subject] },
+      grades: { ...student.grades, [form.subject]: grade },
+    }));
+
+    setForm({ subject: subjects[0], grade: "" });
+    setShowForm(false);
+  };
+
   return (
     <div className="page-enter">
-      <div className="page-heading-row"><div><div className="eyebrow">HOW YOU ARE DOING</div><h1>Academic Performance</h1><p className="muted">Current grades compared with the previous recorded values.</p></div><div className={`page-pill ${averageChange >= 0 ? "pill-positive" : "pill-negative"}`}>{averageChange >= 0 ? "+" : ""}{averageChange.toFixed(1)} average change</div></div>
+      <div className="page-heading-row">
+        <div>
+          <div className="eyebrow">HOW YOU ARE DOING</div>
+          <h1>Academic Performance</h1>
+          <p className="muted">Current grades compared with the previous recorded values.</p>
+        </div>
+        <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+          <div className={`page-pill ${averageChange >= 0 ? "pill-positive" : "pill-negative"}`}>{averageChange >= 0 ? "+" : ""}{averageChange.toFixed(1)} average change</div>
+          <button className="btn-primary" onClick={() => setShowForm((v) => !v)}>{showForm ? "Cancel" : "Update Grade"}</button>
+        </div>
+      </div>
+
+      {showForm && (
+        <div className="card form-card">
+          <div className="card-heading"><div><h4>Update Current Grade</h4><span className="muted">The existing current grade becomes the new "previous" value.</span></div></div>
+          <form onSubmit={updateGrade}>
+            <label>Subject</label>
+            <select value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })}>
+              {subjects.map((subject) => <option key={subject}>{subject}</option>)}
+            </select>
+            <label>New Grade (0-100)</label>
+            <input type="number" min="0" max="100" value={form.grade} onChange={(e) => setForm({ ...form, grade: e.target.value })} />
+            <button type="submit" className="btn-primary form-button">Save Grade</button>
+          </form>
+        </div>
+      )}
 
       <div className="grid grid-4">
         <div className="card stat-card hover-card"><div className="stat-label">Average Grade</div><div className="stat-value">{studentAverage(me).toFixed(1)}</div><div className="stat-sub">current average</div></div>
