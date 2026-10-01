@@ -48,7 +48,7 @@ export default function About() {
           <h4 style={{ marginTop: 4 }}>What we're looking at</h4>
           <ul className="detail-list-plain" style={{ marginTop: 8 }}>
             <li>📚 Study time and frequency per subject</li>
-            <li>🧠 Preferred study methods</li>
+            <li>🧠 Preferred study methods and their outcomes</li>
             <li>🎯 Focus and concentration levels</li>
             <li>📊 Academic grades and progress over time</li>
             <li>🔗 Patterns between study habits and grades</li>

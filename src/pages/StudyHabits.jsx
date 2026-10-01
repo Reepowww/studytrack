@@ -2,6 +2,12 @@ import { useMemo, useState } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { subjects, methods, averageSessionDuration, getMostStudiedSubject, sessionHours } from "../data/students.js";
 
+const formatSessionDate = (date) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return date;
+  const [year, month, day] = date.split("-").map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+};
+
 export default function StudyHabits({ currentStudent, setCurrentStudent }) {
   const [form, setForm] = useState({ subject: subjects[0], duration: 60, method: methods[0], focus: 3 });
   const sessions = currentStudent.sessions;
@@ -21,7 +27,8 @@ export default function StudyHabits({ currentStudent, setCurrentStudent }) {
     const focus = Number(form.focus);
     if (!duration || duration < 5 || focus < 1 || focus > 5) return;
 
-    const today = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     const newSession = { date: today, ...form, duration, focus };
     setCurrentStudent((student) => ({ ...student, sessions: [newSession, ...student.sessions] }));
     setForm({ subject: subjects[0], duration: 60, method: methods[0], focus: 3 });
@@ -79,7 +86,7 @@ export default function StudyHabits({ currentStudent, setCurrentStudent }) {
             <tbody>
               {sessions.map((session, index) => (
                 <tr key={`${session.date}-${index}`}>
-                  <td>{session.date}</td><td>{session.subject}</td><td>{session.duration} min</td><td>{session.method}</td>
+                  <td>{formatSessionDate(session.date)}</td><td>{session.subject}</td><td>{session.duration} min</td><td>{session.method}</td>
                   <td><span className="focus-stars" aria-label={`${session.focus} out of 5`}>{
                     "★".repeat(session.focus) + "☆".repeat(5 - session.focus)
                   }</span></td>

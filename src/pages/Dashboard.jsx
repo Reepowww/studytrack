@@ -3,13 +3,12 @@ import {
 } from "recharts";
 import StatCard from "../components/StatCard.jsx";
 import {
-  students, studentAverage, sampleSummary, subjects, avg, averageSessionDuration,
-  getMostStudiedSubject, getSubjectHours, getStudyStreak,
+  studentAverage, subjects, avg, averageSessionDuration,
+  getMostStudiedSubject, getSubjectHours, getStudyStreak, getStudentSubjectProgress,
 } from "../data/students.js";
 
-export default function Dashboard({ currentStudent }) {
+export default function Dashboard({ currentStudent, setPage }) {
   const me = currentStudent;
-  const summary = sampleSummary(students);
   const weekData = me.weeklyHours.map((hours, i) => ({ week: `W${i + 1}`, hours }));
   const subjectHours = subjects.map((subject) => ({
     subject: subject.length > 10 ? subject.split(" ")[0] : subject,
@@ -20,6 +19,11 @@ export default function Dashboard({ currentStudent }) {
   const weakestSubject = Object.entries(me.grades).sort((a, b) => a[1] - b[1])[0];
   const latestWeek = me.weeklyHours[me.weeklyHours.length - 1];
   const streak = getStudyStreak(me.sessions);
+  const subjectProgress = getStudentSubjectProgress(me);
+  const needsAttention = subjectProgress.filter((progress) => progress.status !== "on-track");
+  const focusSubjects = [...subjectProgress]
+    .sort((a, b) => ({ recommended: 2, attention: 1, "on-track": 0 }[b.status] - { recommended: 2, attention: 1, "on-track": 0 }[a.status]))
+    .slice(0, 3);
 
   return (
     <div className="page-enter">
@@ -48,6 +52,27 @@ export default function Dashboard({ currentStudent }) {
         <StatCard label="Focus Rating" value={`${me.focusLevel.toFixed(1)} / 5`} sub="self-rated avg" />
       </div>
 
+      <div className="goal-focus-heading">
+        <div><div className="section-title">Study Goals &amp; Recommendations</div><h3>Your Study Focus</h3></div>
+        <button className="btn-primary" onClick={() => setPage?.("performance")}>Manage goals</button>
+      </div>
+      <div className="goal-focus-list">
+        {focusSubjects.map((progress) => {
+          const statusLabel = progress.status === "recommended" ? "Study Recommended"
+            : progress.status === "attention" ? "Needs Attention" : "On Track";
+          return (
+            <div className={`goal-focus-item goal-${progress.status}`} key={progress.subject}>
+              <div className="goal-focus-main">
+                <strong>{progress.subject}</strong>
+                <span>{progress.currentGrade} / {progress.targetGrade} target</span>
+              </div>
+              <span className={`goal-status status-${progress.status}`}>{statusLabel}</span>
+              <p>{progress.recommendation}</p>
+            </div>
+          );
+        })}
+      </div>
+
       <div className="grid grid-2">
         <div className="card chart-card">
           <div className="card-heading">
@@ -59,7 +84,7 @@ export default function Dashboard({ currentStudent }) {
               <XAxis dataKey="week" fontSize={11} />
               <YAxis fontSize={11} />
               <Tooltip />
-              <Line type="monotone" dataKey="hours" stroke="#4a4ab8" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+              <Line type="monotone" dataKey="hours" stroke="#0ea5e9" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -73,18 +98,19 @@ export default function Dashboard({ currentStudent }) {
               <XAxis dataKey="subject" fontSize={11} />
               <YAxis fontSize={11} />
               <Tooltip />
-              <Bar dataKey="hours" fill="#7b7bd4" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="hours" fill="#38bdf8" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
       </div>
 
       <div className="card insight-card">
-        <div className="insight-kicker">Group Note</div>
-        <h4>Sample average</h4>
+        <div className="insight-kicker">Personal Note</div>
+        <h4>{needsAttention.length ? "Subjects to monitor" : "Goals currently on track"}</h4>
         <p style={{ fontSize: 13, margin: 0 }}>
-          Across all 6 recorded profiles, average weekly study time is <b>{summary.avgHours.toFixed(1)} hrs</b> and
-          average grade is <b>{summary.avgGrade.toFixed(1)}</b>. Your lowest subject is <b>{weakestSubject[0]}</b> — check your logged sessions there.
+          {needsAttention.length
+            ? `${needsAttention.length} of your ${subjectProgress.length} subjects could use monitoring. ${needsAttention[0].subject}: ${needsAttention[0].recommendation}`
+            : "Your recorded subject grades meet their targets, and each has study activity in the last 7 days."}
         </p>
       </div>
     </div>

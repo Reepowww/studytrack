@@ -2,7 +2,6 @@ const NAV = [
   { id: "dashboard", label: "Dashboard", icon: "⌂" },
   { id: "habits", label: "Study Habits", icon: "◫" },
   { id: "performance", label: "Academic Performance", icon: "◎" },
-  { id: "comparison", label: "Student Comparison", icon: "⇄" },
   { id: "analytics", label: "Analytics", icon: "⌁" },
   { id: "recommendations", label: "Recommendations", icon: "✦" },
   { id: "about", label: "About StudyTrack", icon: "i" },

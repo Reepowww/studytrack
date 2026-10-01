@@ -148,30 +148,103 @@ export const getSubjectHours = (sessions) => {
   return totals;
 };
 
-export const sampleSummary = (data = students) => {
-  const avgHours = avg(data.map((s) => avg(s.weeklyHours)));
-  const avgGrade = avg(data.map((s) => studentAverage(s)));
-  const avgFocus = avg(data.map((s) => s.focusLevel));
-  const methodCount = {};
-  data.forEach((s) => (methodCount[s.preferredMethod] = (methodCount[s.preferredMethod] || 0) + 1));
-  const mostCommonMethod = Object.entries(methodCount).sort((a, b) => b[1] - a[1])[0]?.[0] || "—";
-  return { avgHours, avgGrade, avgFocus, mostCommonMethod };
+const parseSessionDate = (date) => {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    const [year, month, day] = date.split("-").map(Number);
+    const parsed = new Date(year, month - 1, day);
+    return parsed.getFullYear() === year && parsed.getMonth() === month - 1 && parsed.getDate() === day
+      ? parsed
+      : null;
+  }
+  const match = date.match(/^([A-Za-z]{3}) (\d{1,2})$/);
+  if (!match) return null;
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const month = months.indexOf(match[1]);
+  if (month < 0) return null;
+  const day = Number(match[2]);
+  const parsed = new Date(2024, month, day);
+  return parsed.getMonth() === month && parsed.getDate() === day ? parsed : null;
 };
 
-export const methodPerformance = (data = students) => {
-  const groups = {};
-  data.forEach((student) => {
-    const method = student.preferredMethod;
-    if (!groups[method]) groups[method] = [];
-    groups[method].push(studentAverage(student));
-  });
-
-  return Object.entries(groups).map(([method, grades]) => ({
-    method,
-    students: grades.length,
-    averageGrade: avg(grades),
-  }));
+const calendarDayDifference = (later, earlier) => {
+  const laterUtc = Date.UTC(later.getFullYear(), later.getMonth(), later.getDate());
+  const earlierUtc = Date.UTC(earlier.getFullYear(), earlier.getMonth(), earlier.getDate());
+  return Math.floor((laterUtc - earlierUtc) / (1000 * 60 * 60 * 24));
 };
+
+export const getSubjectProgress = (student, subject, now = new Date()) => {
+  const currentGrade = Number(student.grades[subject]);
+  const storedTarget = Number(student.targets?.[subject]);
+  const targetGrade = Number.isFinite(storedTarget) && student.targets?.[subject] !== ""
+    ? storedTarget
+    : currentGrade;
+  const recentSessions = student.sessions
+    .filter((session) => session.subject === subject)
+    .map((session) => ({ session, date: parseSessionDate(session.date) }))
+    .filter(({ date }) => date && calendarDayDifference(now, date) >= 0)
+    .sort((a, b) => b.date - a.date);
+  const daysSinceLastSession = recentSessions.length
+    ? calendarDayDifference(now, recentSessions[0].date)
+    : null;
+  const recentSessionCount = recentSessions.filter(({ date }) => calendarDayDifference(now, date) <= 7).length;
+  const gap = targetGrade - currentGrade;
+  const hasLongInactivity = daysSinceLastSession === null || daysSinceLastSession > 14;
+  const hasStaleActivity = daysSinceLastSession === null || daysSinceLastSession > 7;
+  let status;
+  let recommendation;
+
+  if (gap <= 0) {
+    status = "on-track";
+    const gradeProgress = gap < 0
+      ? `Your current grade is ${Math.abs(gap)} points above your target of ${targetGrade}`
+      : "Your current grade is meeting your target";
+    if (hasStaleActivity) {
+      const activityReason = daysSinceLastSession === null
+        ? `you haven't recorded a ${subject} study session yet`
+        : `you haven't recorded a recent study session for ${subject}; your latest was ${daysSinceLastSession} days ago`;
+      recommendation = `${gradeProgress}, but ${activityReason}. Consider logging your study activity to keep your progress visible.`;
+    } else {
+      recommendation = `${gradeProgress}, and you have recorded ${subject} study activity in the last 7 days.`;
+    }
+  } else if (gap >= 10 || hasLongInactivity) {
+    status = "recommended";
+    if (gap >= 10 && hasLongInactivity) {
+      const inactivityReason = daysSinceLastSession === null
+        ? `no ${subject} study session has been recorded yet`
+        : `your latest ${subject} session was ${daysSinceLastSession} days ago`;
+      recommendation = `Your current grade is ${gap} points below your target, and ${inactivityReason} Consider setting aside time to review ${subject}.`;
+    } else if (gap >= 10) {
+      recommendation = `Your current grade is ${gap} points below your target of ${targetGrade}. Consider scheduling a study session for ${subject}.`;
+    } else {
+      recommendation = `Your current grade is ${gap} points below your target, and your latest ${subject} session was ${daysSinceLastSession === null ? "never recorded" : `${daysSinceLastSession} days ago`}. Consider setting aside time to review ${subject}.`;
+    }
+  } else {
+    status = "attention";
+    if (gap > 0 && hasStaleActivity) {
+      const activityReason = daysSinceLastSession === null
+        ? `no ${subject} study session has been recorded yet`
+        : `your latest ${subject} session was ${daysSinceLastSession} days ago`;
+      recommendation = `Your current grade is ${gap} points below your target, and ${activityReason}. Consider scheduling another study session.`;
+    } else if (gap > 0) {
+      recommendation = `Your current grade is ${gap} points below your target of ${targetGrade}. Consider scheduling a study session for ${subject}.`;
+    }
+  }
+
+  return {
+    subject,
+    currentGrade,
+    targetGrade,
+    gap,
+    daysSinceLastSession,
+    lastSessionDate: recentSessions[0]?.session.date || null,
+    recentSessionCount,
+    status,
+    recommendation,
+  };
+};
+
+export const getStudentSubjectProgress = (student, now = new Date()) =>
+  subjects.map((subject) => getSubjectProgress(student, subject, now));
 
 export const correlation = (xs, ys) => {
   const n = xs.length;
@@ -185,12 +258,14 @@ export const correlation = (xs, ys) => {
 
 export const getStudyStreak = (sessions) => {
   if (!sessions.length) return 0;
-  const days = [...new Set(sessions.map((s) => s.date))].sort((a, b) => new Date(b + " 2024") - new Date(a + " 2024"));
+  const days = [...new Set(sessions.map((session) => session.date))]
+    .map(parseSessionDate)
+    .filter(Boolean)
+    .sort((a, b) => b - a);
+  if (!days.length) return 0;
   let streak = 1;
   for (let i = 1; i < days.length; i++) {
-    const prev = new Date(days[i - 1] + " 2024");
-    const curr = new Date(days[i] + " 2024");
-    const diff = (prev - curr) / (1000 * 60 * 60 * 24);
+    const diff = calendarDayDifference(days[i - 1], days[i]);
     if (diff === 1) streak++;
     else break;
   }
