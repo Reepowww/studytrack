@@ -2,6 +2,7 @@ import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
 import StatCard from "../components/StatCard.jsx";
+import SmartStudyReminders from "../components/SmartStudyReminders.jsx";
 import {
   studentAverage, subjects, avg, averageSessionDuration,
   getMostStudiedSubject, getSubjectHours, getStudyStreak, getStudentSubjectProgress,
@@ -72,6 +73,8 @@ export default function Dashboard({ currentStudent, setPage }) {
           );
         })}
       </div>
+
+      <SmartStudyReminders currentStudent={me} streak={streak} />
 
       <div className="grid grid-2">
         <div className="card chart-card">
