@@ -18,12 +18,18 @@ const formatFocusDate = (date) => {
   });
 };
 
-const readFocusPlan = (studentId) => {
+const readFocusPlans = (studentId) => {
   try {
     const saved = JSON.parse(localStorage.getItem(`studytrack:focus:${studentId}`) || "null");
-    return saved?.subject && saved?.topic && saved?.date ? saved : null;
+    const plans = Array.isArray(saved) ? saved : saved ? [saved] : [];
+    return plans
+      .filter((plan) => plan?.subject && plan?.topic && plan?.date)
+      .map((plan, index) => ({
+        ...plan,
+        id: plan.id || `legacy-${studentId}-${index}`,
+      }));
   } catch {
-    return null;
+    return [];
   }
 };
 
@@ -34,7 +40,7 @@ export default function SmartStudyReminders({ currentStudent, streak }) {
   const hasGradeData = gradeEntries.length > 0;
   const weakestSubject = gradeEntries[0]?.[0] || subjects[0];
   const storageKey = `studytrack:focus:${currentStudent.id}`;
-  const [focusPlan, setFocusPlan] = useState(() => readFocusPlan(currentStudent.id));
+  const [focusPlans, setFocusPlans] = useState(() => readFocusPlans(currentStudent.id));
   const [form, setForm] = useState({
     subject: weakestSubject,
     topic: "Review key concepts",
@@ -42,6 +48,8 @@ export default function SmartStudyReminders({ currentStudent, streak }) {
   });
   const [reminder, setReminder] = useState(null);
   const [showEmailPreview, setShowEmailPreview] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState(null);
+  const latestFocusPlan = focusPlans[focusPlans.length - 1];
 
   useEffect(() => {
     if (!reminder) return undefined;
@@ -52,23 +60,49 @@ export default function SmartStudyReminders({ currentStudent, streak }) {
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [reminder]);
 
+  useEffect(() => {
+    if (!deleteConfirmation) return undefined;
+    const cancelOnEscape = (event) => {
+      if (event.key === "Escape") setDeleteConfirmation(null);
+    };
+    window.addEventListener("keydown", cancelOnEscape);
+    return () => window.removeEventListener("keydown", cancelOnEscape);
+  }, [deleteConfirmation]);
+
   const saveFocusPlan = (event) => {
     event.preventDefault();
-    const plan = { ...form, topic: form.topic.trim() };
-    setFocusPlan(plan);
+    const plan = {
+      ...form,
+      topic: form.topic.trim(),
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    };
+    const nextPlans = [...focusPlans, plan];
+    setFocusPlans(nextPlans);
     try {
-      localStorage.setItem(storageKey, JSON.stringify(plan));
+      localStorage.setItem(storageKey, JSON.stringify(nextPlans));
     } catch {
       // Keep the focus plan available for this session when storage is unavailable.
     }
   };
 
-  const openReminder = (type, plan = focusPlan) => {
+  const deleteFocusPlan = () => {
+    if (!deleteConfirmation) return;
+    const nextPlans = focusPlans.filter((plan) => plan.id !== deleteConfirmation.id);
+    setFocusPlans(nextPlans);
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(nextPlans));
+    } catch {
+      // Keep the focus plan list available for this session when storage is unavailable.
+    }
+    setDeleteConfirmation(null);
+  };
+
+  const openReminder = (type, plan = latestFocusPlan) => {
     setShowEmailPreview(false);
     setReminder({ type, plan });
   };
 
-  const activeFocusPlan = reminder?.plan || focusPlan || form;
+  const activeFocusPlan = reminder?.plan || latestFocusPlan || form;
   const emailSubject = reminder?.type === "streak"
     ? `StudyTrack Reminder: Review ${weakestSubject}`
     : `StudyTrack Reminder: ${activeFocusPlan.subject} study focus`;
@@ -94,7 +128,7 @@ export default function SmartStudyReminders({ currentStudent, streak }) {
           <button type="button" className="btn-primary" onClick={() => openReminder("streak")}>
             Test 10-Day Streak Reminder
           </button>
-          <button type="button" className="btn-secondary-light" onClick={() => openReminder("focus", focusPlan || form)}>
+          <button type="button" className="btn-secondary-light" onClick={() => openReminder("focus", latestFocusPlan || form)}>
             Test Study Focus Reminder
           </button>
         </div>
@@ -102,7 +136,7 @@ export default function SmartStudyReminders({ currentStudent, streak }) {
         <form className="reminder-form" onSubmit={saveFocusPlan}>
           <div className="reminder-form-heading">
             <div><h4>Plan a Study Focus</h4><p className="muted">Set a subject, topic, and target date for the demo reminder.</p></div>
-            {focusPlan && <span className="chart-badge">saved on this device</span>}
+            {focusPlans.length > 0 && <span className="chart-badge">saved on this device</span>}
           </div>
           <div className="reminder-fields">
             <div>
@@ -123,14 +157,40 @@ export default function SmartStudyReminders({ currentStudent, streak }) {
           <button type="submit" className="btn-primary reminder-save-button">Save Study Focus</button>
         </form>
 
-        {focusPlan && (
-          <div className="saved-focus" aria-live="polite">
-            <span><b>{focusPlan.subject}:</b> {focusPlan.topic}</span>
-            <span>{formatFocusDate(focusPlan.date)}</span>
+        {focusPlans.length > 0 && (
+          <div className="saved-focus-list" aria-live="polite">
+            {focusPlans.map((plan) => (
+              <div className="saved-focus" key={plan.id}>
+                <span><b>{plan.subject}:</b> {plan.topic}</span>
+                <span>{formatFocusDate(plan.date)}</span>
+                <button
+                  type="button"
+                  className="saved-focus-delete"
+                  onClick={() => setDeleteConfirmation(plan)}
+                  aria-label={`Delete ${plan.subject}: ${plan.topic}`}
+                >
+                  Delete
+                </button>
+              </div>
+            ))}
           </div>
         )}
         <p className="reminder-demo-note">Test buttons simulate the reminder immediately. No email is sent.</p>
       </section>
+
+      {deleteConfirmation && createPortal(
+        <div className="reminder-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) setDeleteConfirmation(null); }}>
+          <section className="reminder-dialog delete-focus-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-focus-title">
+            <h3 id="delete-focus-title">Delete this study focus?</h3>
+            <p className="muted">This will permanently remove “{deleteConfirmation.topic}” from your saved study focuses.</p>
+            <div className="reminder-dialog-actions">
+              <button type="button" className="btn-secondary-light" onClick={() => setDeleteConfirmation(null)}>Cancel</button>
+              <button type="button" className="saved-focus-delete-confirm" onClick={deleteFocusPlan}>Delete</button>
+            </div>
+          </section>
+        </div>,
+        document.body,
+      )}
 
       {reminder && createPortal(
         <div className="reminder-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) setReminder(null); }}>
