@@ -148,7 +148,8 @@ export const getSubjectHours = (sessions) => {
   return totals;
 };
 
-const parseSessionDate = (date) => {
+export const parseSessionDate = (date, now = new Date()) => {
+  if (typeof date !== "string") return null;
   if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     const [year, month, day] = date.split("-").map(Number);
     const parsed = new Date(year, month - 1, day);
@@ -162,8 +163,32 @@ const parseSessionDate = (date) => {
   const month = months.indexOf(match[1]);
   if (month < 0) return null;
   const day = Number(match[2]);
-  const parsed = new Date(2024, month, day);
-  return parsed.getMonth() === month && parsed.getDate() === day ? parsed : null;
+  const candidates = Array.from({ length: 9 }, (_, index) => now.getFullYear() + index - 4)
+    .map((year) => new Date(year, month, day))
+    .filter((parsed) => parsed.getMonth() === month && parsed.getDate() === day);
+  if (!candidates.length) return null;
+  const closest = candidates.reduce((closestDate, candidate) => {
+    const candidateDistance = Math.abs(calendarDayDifference(now, candidate));
+    const closestDistance = Math.abs(calendarDayDifference(now, closestDate));
+    const candidateIsPast = calendarDayDifference(now, candidate) >= 0;
+    const closestIsPast = calendarDayDifference(now, closestDate) >= 0;
+    return candidateDistance < closestDistance
+      || (candidateDistance === closestDistance && candidateIsPast && !closestIsPast)
+      ? candidate
+      : closestDate;
+  });
+  const closestPast = candidates
+    .filter((candidate) => calendarDayDifference(now, candidate) >= 0)
+    .sort((a, b) => calendarDayDifference(now, a) - calendarDayDifference(now, b))[0];
+  const closestFuture = candidates
+    .filter((candidate) => calendarDayDifference(now, candidate) < 0)
+    .sort((a, b) => calendarDayDifference(now, b) - calendarDayDifference(now, a))[0];
+  // Leap-day gaps can make the next occurrence look one day closer than the previous one.
+  if (closestPast && closestFuture
+    && calendarDayDifference(now, closestPast) - Math.abs(calendarDayDifference(now, closestFuture)) === 1) {
+    return closestPast;
+  }
+  return closest;
 };
 
 const calendarDayDifference = (later, earlier) => {
@@ -173,14 +198,19 @@ const calendarDayDifference = (later, earlier) => {
 };
 
 export const getSubjectProgress = (student, subject, now = new Date()) => {
-  const currentGrade = Number(student.grades[subject]);
-  const storedTarget = Number(student.targets?.[subject]);
-  const targetGrade = Number.isFinite(storedTarget) && student.targets?.[subject] !== ""
+  const rawGrade = student.grades?.[subject];
+  const currentGrade = rawGrade !== null && rawGrade !== undefined && rawGrade !== ""
+    ? Number(rawGrade)
+    : NaN;
+  const rawTarget = student.targets?.[subject];
+  const storedTarget = Number(rawTarget);
+  const targetGrade = Number.isFinite(storedTarget) && rawTarget !== null
+    && rawTarget !== undefined && rawTarget !== ""
     ? storedTarget
     : currentGrade;
   const recentSessions = student.sessions
-    .filter((session) => session.subject === subject)
-    .map((session) => ({ session, date: parseSessionDate(session.date) }))
+    .filter((session) => session?.subject === subject)
+    .map((session) => ({ session, date: parseSessionDate(session.date, now) }))
     .filter(({ date }) => date && calendarDayDifference(now, date) >= 0)
     .sort((a, b) => b.date - a.date);
   const daysSinceLastSession = recentSessions.length
@@ -256,11 +286,13 @@ export const correlation = (xs, ys) => {
   return denX && denY ? num / (denX * denY) : 0;
 };
 
-export const getStudyStreak = (sessions) => {
-  if (!sessions.length) return 0;
-  const days = [...new Set(sessions.map((session) => session.date))]
-    .map(parseSessionDate)
+export const getStudyStreak = (sessions = [], now = new Date()) => {
+  if (!Array.isArray(sessions) || !sessions.length) return 0;
+  const days = [...new Set(sessions.map((session) => parseSessionDate(session?.date, now))
     .filter(Boolean)
+    .map((date) => date.getTime()))]
+    .map((timestamp) => new Date(timestamp))
+    .filter((date) => date && calendarDayDifference(now, date) >= 0)
     .sort((a, b) => b - a);
   if (!days.length) return 0;
   let streak = 1;

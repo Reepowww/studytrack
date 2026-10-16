@@ -189,13 +189,26 @@ p { line-height: 1.55; margin: 0 0 8px; }
 .notice-banner b { color: var(--text); }
 
 /* Recommendations */
-.rec-card { display: flex; gap: 12px; align-items: flex-start; }
-.rec-number {
-  width: 30px; height: 30px; flex: 0 0 30px; display: flex; align-items: center;
-  justify-content: center; border-radius: 9px; background: linear-gradient(135deg, var(--primary-light), var(--primary-soft));
-  color: var(--primary-dark); font-size: 11px; font-weight: 700;
+.rec-card { display: flex; gap: 13px; align-items: flex-start; min-width: 0; border-left: 3px solid #bfdbfe; }
+.rec-icon {
+  width: 34px; height: 34px; flex: 0 0 34px; display: flex; align-items: center;
+  justify-content: center; border-radius: 10px; background: var(--primary-light);
+  color: var(--primary-dark); font-size: 16px; font-weight: 700;
 }
-.rec-card p { margin: 0; font-size: 13px; }
+.rec-content { min-width: 0; flex: 1; }
+.rec-type { color: var(--primary-dark); font-size: 11px; letter-spacing: .04em; margin: 1px 0 6px; }
+.rec-card .rec-message { margin: 0; color: var(--text); font-size: 13px; line-height: 1.55; }
+.rec-card .rec-reason { margin: 7px 0 11px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.rec-achievement { border-left-color: #fbbf24; background: linear-gradient(115deg, #fffdf5, #fff 38%); }
+.rec-achievement .rec-icon { color: #a16207; background: #fef3c7; }
+.rec-encouragement { border-left-color: #38bdf8; background: linear-gradient(115deg, #f5fbff, #fff 38%); }
+.rec-next-step { border-left-color: #93c5fd; }
+.rec-action { display: inline-flex; align-items: center; gap: 8px; padding: 7px 11px; font-size: 11px; }
+.rec-action span { font-size: 14px; line-height: 1; transition: transform .15s ease; }
+.rec-action:hover span { transform: translateX(2px); }
+.rec-welcome { display: flex; align-items: flex-start; gap: 10px; color: #475569; }
+.rec-welcome > span { font-size: 16px; line-height: 1.2; }
+.rec-welcome b { color: var(--primary-dark); }
 .recommendation-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .recommendation-grid .card { margin-bottom: 0; }
 .snapshot-card { margin-top: 16px; }

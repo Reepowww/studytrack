@@ -22,8 +22,10 @@ const getStudentTargets = (student) => {
   try {
     const savedTargets = JSON.parse(localStorage.getItem(`studytrack:targets:${student.id}`) || "{}");
     return Object.fromEntries(subjects.map((subject) => {
-      const target = Number(savedTargets?.[subject]);
-      return [subject, Number.isFinite(target) && savedTargets?.[subject] !== "" && target >= 0 && target <= 100
+      const rawTarget = savedTargets?.[subject];
+      const target = Number(rawTarget);
+      return [subject, Number.isFinite(target) && rawTarget !== null && rawTarget !== undefined
+        && rawTarget !== "" && target >= 0 && target <= 100
         ? target
         : student.grades[subject]];
     }));
