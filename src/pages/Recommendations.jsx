@@ -8,7 +8,7 @@ const toScoreMap = (scores) => Object.fromEntries(
     .map(([subject, value]) => [subject, Number(value)]),
 );
 
-export function buildRecommendations(student = {}, now = new Date()) {
+function buildRecommendations(student = {}, now = new Date()) {
   const source = student && typeof student === "object" ? student : {};
   const records = {
     ...source,
