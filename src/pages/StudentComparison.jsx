@@ -10,6 +10,8 @@ export default function StudentComparison({ currentStudent }) {
 
   const a = students.find((s) => s.id === aId);
   const b = students.find((s) => s.id === bId);
+  const averageA = studentAverage(a);
+  const averageB = studentAverage(b);
 
   const handleAChange = (newId) => {
     setAId(newId);
@@ -22,7 +24,9 @@ export default function StudentComparison({ currentStudent }) {
 
   const chartData = [
     { metric: "Weekly Hours", A: Number(avg(a.weeklyHours).toFixed(1)), B: Number(avg(b.weeklyHours).toFixed(1)) },
-    { metric: "Avg Grade", A: Number(studentAverage(a).toFixed(1)), B: Number(studentAverage(b).toFixed(1)) },
+    ...(averageA !== null && averageB !== null
+      ? [{ metric: "Avg Grade", A: Number(averageA.toFixed(1)), B: Number(averageB.toFixed(1)) }]
+      : []),
     { metric: "Focus", A: a.focusLevel, B: b.focusLevel },
     { metric: "Frequency", A: a.studyFrequency, B: b.studyFrequency },
   ];
@@ -67,7 +71,7 @@ export default function StudentComparison({ currentStudent }) {
               <li><span>Study Frequency</span><b>{student.studyFrequency}x/week</b></li>
               <li><span>Preferred Method</span><b>{student.preferredMethod}</b></li>
               <li><span>Focus Level</span><b>{student.focusLevel.toFixed(1)} / 5</b></li>
-              <li><span>Academic Average</span><b>{studentAverage(student).toFixed(1)}</b></li>
+              <li><span>Academic Average</span><b>{studentAverage(student)?.toFixed(1) ?? "—"}</b></li>
             </ul>
           </div>
         ))}

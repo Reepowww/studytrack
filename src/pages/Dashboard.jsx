@@ -4,25 +4,34 @@ import {
 import StatCard from "../components/StatCard.jsx";
 import SmartStudyReminders from "../components/SmartStudyReminders.jsx";
 import {
-  studentAverage, subjects, avg, averageSessionDuration,
+  studentAverage, avg, averageSessionDuration,
   getMostStudiedSubject, getSubjectHours, getStudyStreak, getStudentSubjectProgress,
 } from "../data/students.js";
+import { getStudentSubjects, isRecordedGrade } from "../data/studentData.js";
 
 export default function Dashboard({ currentStudent, setPage }) {
   const me = currentStudent;
-  const weekData = me.weeklyHours.map((hours, i) => ({ week: `W${i + 1}`, hours }));
+  const subjects = getStudentSubjects(me);
+  const sessions = Array.isArray(me.sessions) ? me.sessions : [];
+  const weeklyHours = Array.isArray(me.weeklyHours) ? me.weeklyHours : [];
+  const grades = Object.entries(me.grades || {})
+    .filter(([, grade]) => isRecordedGrade(grade));
+  const validWeeks = weeklyHours.filter(isRecordedGrade).map(Number);
+  const weekData = validWeeks.map((hours, i) => ({ week: `W${i + 1}`, hours }));
+  const subjectMinutes = getSubjectHours(sessions);
   const subjectHours = subjects.map((subject) => ({
     subject: subject.length > 10 ? subject.split(" ")[0] : subject,
-    hours: Number(((getSubjectHours(me.sessions)[subject] || 0) / 60).toFixed(1)),
+    hours: Number(((subjectMinutes[subject] || 0) / 60).toFixed(1)),
   }));
-  const averageDuration = averageSessionDuration(me.sessions);
-  const topSubject = Object.entries(me.grades).sort((a, b) => b[1] - a[1])[0];
-  const weakestSubject = Object.entries(me.grades).sort((a, b) => a[1] - b[1])[0];
-  const latestWeek = me.weeklyHours[me.weeklyHours.length - 1];
-  const streak = getStudyStreak(me.sessions);
+  const averageDuration = averageSessionDuration(sessions);
+  const topSubject = [...grades].sort((a, b) => Number(b[1]) - Number(a[1]))[0];
+  const weakestSubject = [...grades].sort((a, b) => Number(a[1]) - Number(b[1]))[0];
+  const latestWeek = validWeeks[validWeeks.length - 1];
+  const streak = getStudyStreak(sessions);
   const subjectProgress = getStudentSubjectProgress(me);
-  const needsAttention = subjectProgress.filter((progress) => progress.status !== "on-track");
+  const needsAttention = subjectProgress.filter((progress) => ["recommended", "attention"].includes(progress.status));
   const focusSubjects = [...subjectProgress]
+    .filter((progress) => progress.status !== "untracked")
     .sort((a, b) => ({ recommended: 2, attention: 1, "on-track": 0 }[b.status] - { recommended: 2, attention: 1, "on-track": 0 }[a.status]))
     .slice(0, 3);
 
@@ -39,18 +48,18 @@ export default function Dashboard({ currentStudent, setPage }) {
 
       <div className="section-title">Study Overview</div>
       <div className="grid grid-4">
-        <StatCard label="Hours This Week" value={`${latestWeek} hrs`} sub="latest week" />
-        <StatCard label="Sessions Logged" value={me.sessions.length} sub="total recorded" />
-        <StatCard label="Avg. Session" value={`${Math.round(averageDuration)} min`} sub="per session" />
-        <StatCard label="Most Studied" value={getMostStudiedSubject(me.sessions)} sub="by time logged" />
+        <StatCard label="Hours This Week" value={isRecordedGrade(latestWeek) ? `${latestWeek} hrs` : "—"} sub="latest recorded week" />
+        <StatCard label="Sessions Logged" value={sessions.length} sub="total recorded" />
+        <StatCard label="Avg. Session" value={sessions.length ? `${Math.round(averageDuration)} min` : "—"} sub="per session" />
+        <StatCard label="Most Studied" value={getMostStudiedSubject(sessions)} sub="by time logged" />
       </div>
 
       <div className="section-title">Academic</div>
       <div className="grid grid-4">
-        <StatCard label="Overall Average" value={studentAverage(me).toFixed(1)} sub="current grades" />
-        <StatCard label="Highest" value={topSubject[0]} sub={`grade: ${topSubject[1]}`} />
-        <StatCard label="Needs Work" value={weakestSubject[0]} sub={`grade: ${weakestSubject[1]}`} />
-        <StatCard label="Focus Rating" value={`${me.focusLevel.toFixed(1)} / 5`} sub="self-rated avg" />
+        <StatCard label="Overall Average" value={grades.length ? studentAverage(me).toFixed(1) : "—"} sub="recorded current grades" />
+        <StatCard label="Highest" value={topSubject?.[0] || "—"} sub={topSubject ? `grade: ${topSubject[1]}` : "no grade recorded"} />
+        <StatCard label="Needs Work" value={weakestSubject?.[0] || "—"} sub={weakestSubject ? `grade: ${weakestSubject[1]}` : "no grade recorded"} />
+        <StatCard label="Focus Rating" value={me.focusLevel !== null && me.focusLevel !== undefined && me.focusLevel !== "" && Number.isFinite(Number(me.focusLevel)) ? `${Number(me.focusLevel).toFixed(1)} / 5` : "—"} sub="self-rated avg" />
       </div>
 
       <div className="goal-focus-heading">
@@ -58,7 +67,7 @@ export default function Dashboard({ currentStudent, setPage }) {
         <button className="btn-primary" onClick={() => setPage?.("performance")}>Manage goals</button>
       </div>
       <div className="goal-focus-list">
-        {focusSubjects.map((progress) => {
+        {focusSubjects.length ? focusSubjects.map((progress) => {
           const statusLabel = progress.status === "recommended" ? "Study Recommended"
             : progress.status === "attention" ? "Needs Attention" : "On Track";
           return (
@@ -71,7 +80,7 @@ export default function Dashboard({ currentStudent, setPage }) {
               <p>{progress.recommendation}</p>
             </div>
           );
-        })}
+        }) : <div className="empty-state-note">Add a current grade and optional target to see subject-specific study suggestions.</div>}
       </div>
 
       <SmartStudyReminders currentStudent={me} streak={streak} />
@@ -81,7 +90,7 @@ export default function Dashboard({ currentStudent, setPage }) {
           <div className="card-heading">
             <div><h4>Weekly Study Hours</h4><span className="muted">Last 7 weeks</span></div>
           </div>
-          <ResponsiveContainer width="100%" height={220}>
+          {weekData.length ? <ResponsiveContainer width="100%" height={220}>
             <LineChart data={weekData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
               <XAxis dataKey="week" fontSize={11} />
@@ -89,13 +98,13 @@ export default function Dashboard({ currentStudent, setPage }) {
               <Tooltip />
               <Line type="monotone" dataKey="hours" stroke="#0ea5e9" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
             </LineChart>
-          </ResponsiveContainer>
+          </ResponsiveContainer> : <p className="empty-state-note">No weekly study-hour records are available yet.</p>}
         </div>
         <div className="card chart-card">
           <div className="card-heading">
             <div><h4>Hours by Subject</h4><span className="muted">From logged sessions</span></div>
           </div>
-          <ResponsiveContainer width="100%" height={220}>
+          {subjects.length ? <ResponsiveContainer width="100%" height={220}>
             <BarChart data={subjectHours}>
               <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
               <XAxis dataKey="subject" fontSize={11} />
@@ -103,7 +112,7 @@ export default function Dashboard({ currentStudent, setPage }) {
               <Tooltip />
               <Bar dataKey="hours" fill="#38bdf8" radius={[4, 4, 0, 0]} />
             </BarChart>
-          </ResponsiveContainer>
+          </ResponsiveContainer> : <p className="empty-state-note">Add a subject to organize study sessions.</p>}
         </div>
       </div>
 
@@ -113,7 +122,9 @@ export default function Dashboard({ currentStudent, setPage }) {
         <p style={{ fontSize: 13, margin: 0 }}>
           {needsAttention.length
             ? `${needsAttention.length} of your ${subjectProgress.length} subjects could use monitoring. ${needsAttention[0].subject}: ${needsAttention[0].recommendation}`
-            : "Your recorded subject grades meet their targets, and each has study activity in the last 7 days."}
+            : focusSubjects.length
+              ? "Your recorded subject grades meet their saved targets. Keep logging sessions if you want activity to appear here."
+              : "Add subjects, grades, or study sessions to build a personal overview from your own records."}
         </p>
       </div>
     </div>

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { subjects, methods, averageSessionDuration, getMostStudiedSubject, sessionHours } from "../data/students.js";
+import { methods, averageSessionDuration, getMostStudiedSubject, sessionHours } from "../data/students.js";
+import { getStudentSubjects } from "../data/studentData.js";
 
 const formatSessionDate = (date) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return date;
@@ -9,37 +10,59 @@ const formatSessionDate = (date) => {
   return new Date(year, month - 1, day).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 };
 
-export default function StudyHabits({ currentStudent, setCurrentStudent }) {
-  const [form, setForm] = useState({ subject: subjects[0], duration: 60, method: methods[0], focus: 3 });
+export default function StudyHabits({ currentStudent, setCurrentStudent, setPage }) {
+  const subjects = getStudentSubjects(currentStudent);
+  const defaultSubject = subjects[0] || "";
+  const [form, setForm] = useState({ subject: defaultSubject, duration: 60, method: methods[0], focus: 3 });
   const [editingSessionId, setEditingSessionId] = useState(null);
   const [deleteSessionId, setDeleteSessionId] = useState(null);
-  const sessions = currentStudent.sessions;
+  const [saveMessage, setSaveMessage] = useState("");
+  const sessions = Array.isArray(currentStudent.sessions)
+    ? currentStudent.sessions.filter((session) => session && typeof session === "object")
+    : [];
   const isEditing = editingSessionId !== null;
+
+  useEffect(() => {
+    if (form.subject !== defaultSubject && !subjects.includes(form.subject) && !isEditing) {
+      setForm((current) => ({ ...current, subject: defaultSubject }));
+    }
+  }, [subjects, defaultSubject, form.subject, isEditing]);
 
   const methodData = useMemo(() => {
     const counts = {};
-    sessions.forEach((session) => (counts[session.method] = (counts[session.method] || 0) + 1));
+    sessions.forEach((session) => {
+      if (typeof session.method === "string" && session.method.trim()) {
+        counts[session.method] = (counts[session.method] || 0) + 1;
+      }
+    });
     return Object.entries(counts).map(([method, count]) => ({ method, count }));
   }, [sessions]);
 
-  const avgFocus = sessions.length ? sessions.reduce((total, session) => total + Number(session.focus), 0) / sessions.length : 0;
+  const focusValues = sessions.map((session) => Number(session?.focus))
+    .filter((focus, index) => Number.isFinite(focus) && focus >= 1 && focus <= 5
+      && sessions[index]?.focus !== "");
+  const hasDurationData = sessions.some((session) => session.duration !== null
+    && session.duration !== undefined && session.duration !== ""
+    && Number.isFinite(Number(session.duration)) && Number(session.duration) > 0);
+  const avgFocus = focusValues.length ? focusValues.reduce((total, focus) => total + focus, 0) / focusValues.length : null;
   const mostStudied = getMostStudiedSubject(sessions);
 
   const saveSession = (event) => {
     event.preventDefault();
     const duration = Number(form.duration);
     const focus = Number(form.focus);
-    if (!duration || duration < 5 || focus < 1 || focus > 5) return;
+    if (!form.subject || !subjects.includes(form.subject) || !duration || duration < 5 || focus < 1 || focus > 5) return;
 
     if (editingSessionId !== null) {
       setCurrentStudent((student) => ({
         ...student,
-        sessions: student.sessions.map((session) => session.id === editingSessionId
+        sessions: (Array.isArray(student.sessions) ? student.sessions : []).map((session) => session?.id === editingSessionId
           ? { ...session, ...form, duration, focus }
           : session),
       }));
       setEditingSessionId(null);
-      setForm({ subject: subjects[0], duration: 60, method: methods[0], focus: 3 });
+      setForm({ subject: defaultSubject, duration: 60, method: methods[0], focus: 3 });
+      setSaveMessage("Study session updated.");
       return;
     }
 
@@ -47,8 +70,9 @@ export default function StudyHabits({ currentStudent, setCurrentStudent }) {
     const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const newSession = { id, date: today, ...form, duration, focus };
-    setCurrentStudent((student) => ({ ...student, sessions: [newSession, ...student.sessions] }));
-    setForm({ subject: subjects[0], duration: 60, method: methods[0], focus: 3 });
+    setCurrentStudent((student) => ({ ...student, sessions: [newSession, ...(Array.isArray(student.sessions) ? student.sessions : [])] }));
+    setForm({ subject: defaultSubject, duration: 60, method: methods[0], focus: 3 });
+    setSaveMessage("Study session saved.");
   };
 
   const editSession = (session) => {
@@ -58,13 +82,13 @@ export default function StudyHabits({ currentStudent, setCurrentStudent }) {
       duration: session.duration,
       method: session.method,
       focus: session.focus,
-      date: session.date,
+      date: session.date || "",
     });
   };
 
   const cancelEditing = () => {
     setEditingSessionId(null);
-    setForm({ subject: subjects[0], duration: 60, method: methods[0], focus: 3 });
+    setForm({ subject: defaultSubject, duration: 60, method: methods[0], focus: 3 });
   };
 
   useEffect(() => {
@@ -80,7 +104,7 @@ export default function StudyHabits({ currentStudent, setCurrentStudent }) {
     if (deleteSessionId === null) return;
     setCurrentStudent((student) => ({
       ...student,
-      sessions: student.sessions.filter((session) => session.id !== deleteSessionId),
+      sessions: (Array.isArray(student.sessions) ? student.sessions : []).filter((session) => session?.id !== deleteSessionId),
     }));
     setDeleteSessionId(null);
   };
@@ -94,13 +118,15 @@ export default function StudyHabits({ currentStudent, setCurrentStudent }) {
         </>
       )}
       <label htmlFor="session-subject">Subject</label>
-      <select id="session-subject" value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })}>{subjects.map((subject) => <option key={subject}>{subject}</option>)}</select>
+      <select id="session-subject" value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} required disabled={!subjects.length}>
+        {subjects.length ? subjects.map((subject) => <option key={subject} value={subject}>{subject}</option>) : <option value="">Add a subject first</option>}
+      </select>
       <label htmlFor="session-duration">Duration (min)</label>
-      <input id="session-duration" type="number" min="5" value={form.duration} onChange={(e) => setForm({ ...form, duration: e.target.value })} />
+      <input id="session-duration" type="number" min="5" value={form.duration} onChange={(e) => setForm({ ...form, duration: e.target.value })} required />
       <label htmlFor="session-method">Method</label>
       <select id="session-method" value={form.method} onChange={(e) => setForm({ ...form, method: e.target.value })}>{methods.map((method) => <option key={method}>{method}</option>)}</select>
       <label htmlFor="session-focus">Focus Level (1-5)</label>
-      <input id="session-focus" type="number" min="1" max="5" value={form.focus} onChange={(e) => setForm({ ...form, focus: e.target.value })} />
+      <input id="session-focus" type="number" min="1" max="5" value={form.focus} onChange={(e) => setForm({ ...form, focus: e.target.value })} required />
       <div className={editing ? "session-edit-actions" : undefined}>
         <button type="submit" className="btn-primary form-button">{editing ? "Save Changes" : "Add Session"}</button>
         {editing && <button type="button" className="btn-secondary-light form-button" onClick={cancelEditing}>Cancel</button>}
@@ -117,8 +143,8 @@ export default function StudyHabits({ currentStudent, setCurrentStudent }) {
 
       <div className="grid grid-4">
         <div className="card stat-card hover-card"><div className="stat-label">Total Sessions</div><div className="stat-value">{sessions.length}</div><div className="stat-sub">recorded</div></div>
-        <div className="card stat-card hover-card"><div className="stat-label">Logged Study Time</div><div className="stat-value">{sessionHours(sessions).toFixed(1)} hrs</div><div className="stat-sub">from sessions</div></div>
-        <div className="card stat-card hover-card"><div className="stat-label">Avg. Focus</div><div className="stat-value">{avgFocus.toFixed(1)} / 5</div><div className="stat-sub">session ratings</div></div>
+        <div className="card stat-card hover-card"><div className="stat-label">Logged Study Time</div><div className="stat-value">{hasDurationData ? `${sessionHours(sessions).toFixed(1)} hrs` : "—"}</div><div className="stat-sub">from sessions</div></div>
+        <div className="card stat-card hover-card"><div className="stat-label">Avg. Focus</div><div className="stat-value">{avgFocus === null ? "—" : `${avgFocus.toFixed(1)} / 5`}</div><div className="stat-sub">session ratings</div></div>
         <div className="card stat-card hover-card"><div className="stat-label">Most Studied</div><div className="stat-value">{mostStudied}</div><div className="stat-sub">by logged minutes</div></div>
       </div>
 
@@ -126,12 +152,12 @@ export default function StudyHabits({ currentStudent, setCurrentStudent }) {
         {!isEditing && (
           <div className="card form-card">
             <div className="card-heading"><div><h4>Log a Study Session</h4><span className="muted">Add a real session to update your snapshot.</span></div></div>
-            {renderSessionForm(false)}
+            {subjects.length ? renderSessionForm(false) : <div className="empty-state-note">Add a subject before logging a session. <button type="button" className="inline-link" onClick={() => setPage?.("performance")}>Manage subjects</button></div>}
           </div>
         )}
         <div className="card chart-card">
           <div className="card-heading"><div><h4>Study Method Frequency</h4><span className="muted">How often each method appears in your logs</span></div></div>
-          <ResponsiveContainer width="100%" height={260}>
+          {methodData.length ? <ResponsiveContainer width="100%" height={260}>
             <BarChart data={methodData} layout="vertical" margin={{ left: 12, right: 12 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
               <XAxis type="number" fontSize={12} allowDecimals={false} />
@@ -139,9 +165,10 @@ export default function StudyHabits({ currentStudent, setCurrentStudent }) {
               <Tooltip />
               <Bar dataKey="count" fill="#5b5bd6" radius={[0, 7, 7, 0]} />
             </BarChart>
-          </ResponsiveContainer>
+          </ResponsiveContainer> : <p className="empty-state-note">Log a study session to see your study methods here.</p>}
         </div>
       </div>
+      {saveMessage && <p className="save-feedback" role="status" aria-live="polite">{saveMessage}</p>}
 
       <div className="card table-card">
         <div className="card-heading"><div><h4>Study Sessions</h4><span className="muted">Newest logged sessions appear first.</span></div><span className="chart-badge">live</span></div>
@@ -151,10 +178,12 @@ export default function StudyHabits({ currentStudent, setCurrentStudent }) {
             <tbody>
               {sessions.map((session, index) => (
                 <tr key={session.id || `${session.date}-${index}`}>
-                  <td>{formatSessionDate(session.date)}</td><td>{session.subject}</td><td>{session.duration} min</td><td>{session.method}</td>
-                  <td><span className="focus-stars" aria-label={`${session.focus} out of 5`}>{
-                    "★".repeat(session.focus) + "☆".repeat(5 - session.focus)
-                  }</span></td>
+                  <td>{typeof session.date === "string" ? formatSessionDate(session.date) : "—"}</td><td>{session.subject || "—"}</td>
+                  <td>{session.duration !== null && session.duration !== undefined && session.duration !== ""
+                    && Number.isFinite(Number(session.duration)) ? `${session.duration} min` : "—"}</td><td>{session.method || "—"}</td>
+                  <td>{Number.isInteger(Number(session.focus)) && Number(session.focus) >= 1 && Number(session.focus) <= 5
+                    ? <span className="focus-stars" aria-label={`${session.focus} out of 5`}>{"★".repeat(Number(session.focus)) + "☆".repeat(5 - Number(session.focus))}</span>
+                    : "—"}</td>
                   <td>
                     {session.id && (
                       <div className="reminder-dialog-actions">

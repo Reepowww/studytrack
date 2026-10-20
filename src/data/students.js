@@ -1,6 +1,6 @@
-// Centralized mock data. Swap this file for API calls later.
+import { getStudentSubjects, isRecordedGrade, isValidTargetGrade } from "./studentData.js";
 
-export const subjects = ["Mathematics", "Programming", "Data Science", "English", "Science"];
+// Centralized mock data. Swap this file for API calls later.
 
 export const methods = [
   "Practice Problems",
@@ -126,24 +126,38 @@ export const students = [
 ];
 
 export const avg = (arr) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
-export const studentAverage = (s) => avg(Object.values(s.grades));
-export const studentTotalWeeklyHours = (s) => s.weeklyHours.reduce((a, b) => a + b, 0);
-export const sessionHours = (sessions) => sessions.reduce((total, session) => total + Number(session.duration || 0), 0) / 60;
-export const averageSessionDuration = (sessions) => avg(sessions.map((session) => Number(session.duration || 0)));
+export const studentAverage = (s) => {
+  const grades = Object.values(s?.grades || {})
+    .filter(isRecordedGrade)
+    .map(Number);
+  return grades.length ? avg(grades) : null;
+};
+export const studentTotalWeeklyHours = (s) => (Array.isArray(s?.weeklyHours) ? s.weeklyHours : [])
+  .reduce((total, hours) => total + (Number.isFinite(Number(hours)) ? Number(hours) : 0), 0);
+export const sessionHours = (sessions) => (Array.isArray(sessions) ? sessions : [])
+  .reduce((total, session) => total + (Number.isFinite(Number(session?.duration))
+    && Number(session.duration) > 0 ? Number(session.duration) : 0), 0) / 60;
+export const averageSessionDuration = (sessions) => avg((Array.isArray(sessions) ? sessions : [])
+  .map((session) => ({ raw: session?.duration, duration: Number(session?.duration) }))
+  .filter(({ raw, duration }) => raw !== "" && raw !== null && raw !== undefined
+    && Number.isFinite(duration) && duration > 0)
+  .map(({ duration }) => duration));
 
 export const getMostStudiedSubject = (sessions) => {
-  if (!sessions.length) return "—";
+  if (!Array.isArray(sessions) || !sessions.length) return "—";
   const totals = {};
   sessions.forEach((session) => {
-    totals[session.subject] = (totals[session.subject] || 0) + Number(session.duration || 0);
+    if (typeof session?.subject !== "string" || !session.subject.trim()) return;
+    totals[session.subject] = (totals[session.subject] || 0) + (Number.isFinite(Number(session.duration)) ? Number(session.duration) : 0);
   });
-  return Object.entries(totals).sort((a, b) => b[1] - a[1])[0][0];
+  return Object.entries(totals).sort((a, b) => b[1] - a[1])[0]?.[0] || "—";
 };
 
 export const getSubjectHours = (sessions) => {
   const totals = {};
-  sessions.forEach((session) => {
-    totals[session.subject] = (totals[session.subject] || 0) + Number(session.duration || 0);
+  (Array.isArray(sessions) ? sessions : []).forEach((session) => {
+    if (typeof session?.subject !== "string" || !session.subject.trim()) return;
+    totals[session.subject] = (totals[session.subject] || 0) + (Number.isFinite(Number(session.duration)) ? Number(session.duration) : 0);
   });
   return totals;
 };
@@ -199,16 +213,13 @@ const calendarDayDifference = (later, earlier) => {
 
 export const getSubjectProgress = (student, subject, now = new Date()) => {
   const rawGrade = student.grades?.[subject];
-  const currentGrade = rawGrade !== null && rawGrade !== undefined && rawGrade !== ""
+  const currentGrade = isRecordedGrade(rawGrade)
     ? Number(rawGrade)
     : NaN;
   const rawTarget = student.targets?.[subject];
-  const storedTarget = Number(rawTarget);
-  const targetGrade = Number.isFinite(storedTarget) && rawTarget !== null
-    && rawTarget !== undefined && rawTarget !== ""
-    ? storedTarget
-    : currentGrade;
-  const recentSessions = student.sessions
+  const targetGrade = isValidTargetGrade(rawTarget) ? Number(rawTarget) : NaN;
+  const hasTarget = Number.isFinite(targetGrade);
+  const recentSessions = (Array.isArray(student.sessions) ? student.sessions : [])
     .filter((session) => session?.subject === subject)
     .map((session) => ({ session, date: parseSessionDate(session.date, now) }))
     .filter(({ date }) => date && calendarDayDifference(now, date) >= 0)
@@ -217,11 +228,27 @@ export const getSubjectProgress = (student, subject, now = new Date()) => {
     ? calendarDayDifference(now, recentSessions[0].date)
     : null;
   const recentSessionCount = recentSessions.filter(({ date }) => calendarDayDifference(now, date) <= 7).length;
-  const gap = targetGrade - currentGrade;
+  const gap = hasTarget && Number.isFinite(currentGrade) ? targetGrade - currentGrade : NaN;
   const hasLongInactivity = daysSinceLastSession === null || daysSinceLastSession > 14;
   const hasStaleActivity = daysSinceLastSession === null || daysSinceLastSession > 7;
   let status;
   let recommendation;
+
+  if (!Number.isFinite(currentGrade) || !hasTarget) {
+    return {
+      subject,
+      currentGrade,
+      targetGrade,
+      gap: NaN,
+      daysSinceLastSession,
+      lastSessionDate: recentSessions[0]?.session.date || null,
+      recentSessionCount,
+      status: "untracked",
+      recommendation: !Number.isFinite(currentGrade)
+        ? `Add a current grade for ${subject} if you want to track a goal. Any saved study sessions will remain available.`
+        : `Your current grade for ${subject} is recorded. Add an optional target to compare progress toward a goal.`,
+    };
+  }
 
   if (gap <= 0) {
     status = "on-track";
@@ -274,7 +301,14 @@ export const getSubjectProgress = (student, subject, now = new Date()) => {
 };
 
 export const getStudentSubjectProgress = (student, now = new Date()) =>
-  subjects.map((subject) => getSubjectProgress(student, subject, now));
+  getStudentSubjects(student)
+    .filter((subject) => typeof subject === "string" && subject.trim())
+    .map((subject) => getSubjectProgress(student, subject, now));
+
+export const getTrackedTargetProgress = (progress) =>
+  (Array.isArray(progress) ? progress : [])
+    .filter(({ currentGrade, targetGrade }) =>
+      Number.isFinite(currentGrade) && Number.isFinite(targetGrade));
 
 export const correlation = (xs, ys) => {
   const n = xs.length;

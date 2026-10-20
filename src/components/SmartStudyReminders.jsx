@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { subjects } from "../data/students.js";
+import {
+  getStudentSubjects,
+  isRecordedGrade,
+  saveStudentFocusPlans,
+} from "../data/studentData.js";
 
 const addDaysToDateInput = (days) => {
   const date = new Date();
@@ -34,12 +38,12 @@ const readFocusPlans = (studentId) => {
 };
 
 export default function SmartStudyReminders({ currentStudent, streak }) {
+  const subjects = getStudentSubjects(currentStudent);
   const gradeEntries = Object.entries(currentStudent.grades || {})
-    .filter(([, grade]) => grade !== "" && grade !== null && Number.isFinite(Number(grade)))
+    .filter(([, grade]) => isRecordedGrade(grade))
     .sort((a, b) => Number(a[1]) - Number(b[1]));
   const hasGradeData = gradeEntries.length > 0;
-  const weakestSubject = gradeEntries[0]?.[0] || subjects[0];
-  const storageKey = `studytrack:focus:${currentStudent.id}`;
+  const weakestSubject = gradeEntries[0]?.[0] || subjects[0] || "";
   const [focusPlans, setFocusPlans] = useState(() => readFocusPlans(currentStudent.id));
   const [form, setForm] = useState({
     subject: weakestSubject,
@@ -49,7 +53,15 @@ export default function SmartStudyReminders({ currentStudent, streak }) {
   const [reminder, setReminder] = useState(null);
   const [showEmailPreview, setShowEmailPreview] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState(null);
+  const [focusSaveNotice, setFocusSaveNotice] = useState(null);
+  const [pendingFocusChange, setPendingFocusChange] = useState(null);
   const latestFocusPlan = focusPlans[focusPlans.length - 1];
+
+  useEffect(() => {
+    if (!subjects.includes(form.subject) && form.subject !== weakestSubject) {
+      setForm((current) => ({ ...current, subject: weakestSubject }));
+    }
+  }, [subjects, weakestSubject, form.subject]);
 
   useEffect(() => {
     if (!reminder) return undefined;
@@ -71,30 +83,59 @@ export default function SmartStudyReminders({ currentStudent, streak }) {
 
   const saveFocusPlan = (event) => {
     event.preventDefault();
+    if (!subjects.includes(form.subject) || !form.topic.trim()) return;
     const plan = {
       ...form,
       topic: form.topic.trim(),
       id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
     };
     const nextPlans = [...focusPlans, plan];
-    setFocusPlans(nextPlans);
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(nextPlans));
-    } catch {
-      // Keep the focus plan available for this session when storage is unavailable.
+    if (saveStudentFocusPlans(currentStudent.id, nextPlans)) {
+      setFocusPlans(nextPlans);
+      setFocusSaveNotice({ type: "success", message: "Study focus saved on this device." });
+      setPendingFocusChange(null);
+    } else {
+      setPendingFocusChange({ plans: nextPlans, action: "save" });
+      setFocusSaveNotice({
+        type: "error",
+        message: "Couldn't save this study focus to browser storage. Your entries are still here; retry when ready.",
+      });
     }
   };
 
   const deleteFocusPlan = () => {
     if (!deleteConfirmation) return;
     const nextPlans = focusPlans.filter((plan) => plan.id !== deleteConfirmation.id);
-    setFocusPlans(nextPlans);
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(nextPlans));
-    } catch {
-      // Keep the focus plan list available for this session when storage is unavailable.
+    if (saveStudentFocusPlans(currentStudent.id, nextPlans)) {
+      setFocusPlans(nextPlans);
+      setDeleteConfirmation(null);
+      setFocusSaveNotice({ type: "success", message: "Study focus removed." });
+      setPendingFocusChange(null);
+    } else {
+      setPendingFocusChange({ plans: nextPlans, action: "delete" });
+      setFocusSaveNotice({
+        type: "error",
+        message: "Couldn't save the deletion. The saved study focus is still available; retry when ready.",
+      });
     }
-    setDeleteConfirmation(null);
+  };
+
+  const retryFocusChange = () => {
+    if (!pendingFocusChange) return;
+    if (!saveStudentFocusPlans(currentStudent.id, pendingFocusChange.plans)) {
+      setFocusSaveNotice({
+        type: "error",
+        message: "The save still failed. Your study-focus changes are still available; you can retry again.",
+      });
+      return;
+    }
+    setFocusPlans(pendingFocusChange.plans);
+    if (pendingFocusChange.action === "delete") setDeleteConfirmation(null);
+    setPendingFocusChange(null);
+    setFocusSaveNotice({
+      type: "success",
+      message: pendingFocusChange.action === "delete" ? "Study focus removed." : "Study focus saved on this device.",
+    });
   };
 
   const openReminder = (type, plan = latestFocusPlan) => {
@@ -104,7 +145,7 @@ export default function SmartStudyReminders({ currentStudent, streak }) {
 
   const activeFocusPlan = reminder?.plan || latestFocusPlan || form;
   const emailSubject = reminder?.type === "streak"
-    ? `StudyTrack Reminder: Review ${weakestSubject}`
+    ? `StudyTrack Reminder: Review ${weakestSubject || "your study plan"}`
     : `StudyTrack Reminder: ${activeFocusPlan.subject} study focus`;
 
   return (
@@ -121,14 +162,14 @@ export default function SmartStudyReminders({ currentStudent, streak }) {
 
         <div className="reminder-status-row">
           <span className="reminder-status">Recorded streak: <b>{streak} {streak === 1 ? "day" : "days"}</b></span>
-          <span className="reminder-status">Lowest recorded grade: <b>{hasGradeData ? `${weakestSubject} (${gradeEntries[0][1]})` : `${weakestSubject} (demo fallback)`}</b></span>
+          <span className="reminder-status">Lowest recorded grade: <b>{hasGradeData ? `${weakestSubject} (${gradeEntries[0][1]})` : "No grade recorded"}</b></span>
         </div>
 
         <div className="reminder-actions">
           <button type="button" className="btn-primary" onClick={() => openReminder("streak")}>
             Test 10-Day Streak Reminder
           </button>
-          <button type="button" className="btn-secondary-light" onClick={() => openReminder("focus", latestFocusPlan || form)}>
+          <button type="button" className="btn-secondary-light" onClick={() => openReminder("focus", latestFocusPlan || form)} disabled={!subjects.length}>
             Test Study Focus Reminder
           </button>
         </div>
@@ -141,21 +182,25 @@ export default function SmartStudyReminders({ currentStudent, streak }) {
           <div className="reminder-fields">
             <div>
               <label htmlFor="reminder-subject">Subject</label>
-              <select id="reminder-subject" value={form.subject} onChange={(event) => setForm({ ...form, subject: event.target.value })}>
-                {subjects.map((subject) => <option key={subject}>{subject}</option>)}
+              <select id="reminder-subject" value={form.subject} onChange={(event) => setForm({ ...form, subject: event.target.value })} disabled={Boolean(pendingFocusChange)}>
+                {subjects.length ? subjects.map((subject) => <option key={subject} value={subject}>{subject}</option>) : <option value="">Add a subject first</option>}
               </select>
             </div>
             <div>
               <label htmlFor="reminder-topic">Study topic / focus</label>
-              <input id="reminder-topic" value={form.topic} onChange={(event) => setForm({ ...form, topic: event.target.value })} required />
+              <input id="reminder-topic" value={form.topic} onChange={(event) => setForm({ ...form, topic: event.target.value })} required disabled={Boolean(pendingFocusChange)} />
             </div>
             <div>
               <label htmlFor="reminder-date">Target study date</label>
-              <input id="reminder-date" type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} required />
+              <input id="reminder-date" type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} required disabled={Boolean(pendingFocusChange)} />
             </div>
           </div>
-          <button type="submit" className="btn-primary reminder-save-button">Save Study Focus</button>
+          <button type="submit" className="btn-primary reminder-save-button" disabled={!subjects.length || Boolean(pendingFocusChange)}>Save Study Focus</button>
         </form>
+        {focusSaveNotice && <p className={focusSaveNotice.type === "error" ? "form-error" : "save-feedback"} role={focusSaveNotice.type === "error" ? "alert" : "status"}>
+          {focusSaveNotice.message}
+          {pendingFocusChange && <button type="button" className="inline-link" onClick={retryFocusChange}>Retry save</button>}
+        </p>}
 
         {focusPlans.length > 0 && (
           <div className="saved-focus-list" aria-live="polite">
@@ -183,6 +228,10 @@ export default function SmartStudyReminders({ currentStudent, streak }) {
           <section className="reminder-dialog delete-focus-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-focus-title">
             <h3 id="delete-focus-title">Delete this study focus?</h3>
             <p className="muted">This will permanently remove “{deleteConfirmation.topic}” from your saved study focuses.</p>
+            {pendingFocusChange?.action === "delete" && <p className="form-error" role="alert">
+              {focusSaveNotice?.message}{" "}
+              <button type="button" className="inline-link" onClick={retryFocusChange}>Retry save</button>
+            </p>}
             <div className="reminder-dialog-actions">
               <button type="button" className="btn-secondary-light" onClick={() => setDeleteConfirmation(null)}>Cancel</button>
               <button type="button" className="saved-focus-delete-confirm" onClick={deleteFocusPlan}>Delete</button>
