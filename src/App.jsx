@@ -17,6 +17,11 @@ import {
   restoreStudentTargets,
   saveStudentSettings,
 } from "./data/studentData.js";
+import {
+  loadCloudSubjects,
+  normalizeCloudSubjectNames,
+  saveCloudSubjects,
+} from "./data/cloudSubjects.js";
 import { supabase } from "./lib/supabase.js";
 
 const PAGES = {
@@ -47,6 +52,7 @@ export default function App() {
   const [authPage, setAuthPage] = useState("login");
   const [authProvider, setAuthProvider] = useState(null);
   const [authNotice, setAuthNotice] = useState("");
+  const [cloudSubjectSync, setCloudSubjectSync] = useState(null);
   const activeAuthUserId = useRef(null);
 
   useEffect(() => {
@@ -55,7 +61,7 @@ export default function App() {
       localStorage.setItem(`studytrack:targets:${currentStudent.id}`, JSON.stringify(currentStudent.targets));
       if (!saveStudentSettings(currentStudent)) {
         setStorageMessage("Browser storage is unavailable. Changes will last only for this session.");
-      } else {
+      } else if (!cloudSubjectSync?.error) {
         setStorageMessage("");
       }
     } catch {
@@ -74,12 +80,50 @@ export default function App() {
     currentStudent?.studyFrequency,
     currentStudent?.focusLevel,
     currentStudent?.preferredMethod,
+    cloudSubjectSync?.error,
+  ]);
+
+  useEffect(() => {
+    if (authProvider !== "supabase" || !currentStudent || !cloudSubjectSync?.loaded
+      || cloudSubjectSync.userId !== activeAuthUserId.current
+      || currentStudent.id !== `supabase_${cloudSubjectSync.userId}`) return undefined;
+
+    const names = Array.isArray(currentStudent.subjects) ? currentStudent.subjects : [];
+    if (JSON.stringify(names) === JSON.stringify(cloudSubjectSync.baseline)) return undefined;
+
+    const { userId } = cloudSubjectSync;
+    const timeout = window.setTimeout(() => {
+      saveCloudSubjects(userId, names).then(() => {
+        if (activeAuthUserId.current !== userId) return;
+        setCloudSubjectSync((current) => current?.userId === userId
+          ? { ...current, baseline: normalizeCloudSubjectNames(names), error: false }
+          : current);
+        setStorageMessage("");
+      }).catch(() => {
+        if (activeAuthUserId.current !== userId) return;
+        setCloudSubjectSync((current) => current?.userId === userId
+          ? { ...current, error: true }
+          : current);
+        setStorageMessage("Could not sync subjects to Supabase. Your local subject list is still saved.");
+      });
+    }, 500);
+
+    return () => window.clearTimeout(timeout);
+  }, [
+    authProvider,
+    currentStudent?.id,
+    currentStudent?.subjects,
+    cloudSubjectSync?.baseline,
+    cloudSubjectSync?.loaded,
+    cloudSubjectSync?.userId,
   ]);
 
   const handleLogin = (student) => {
     activeAuthUserId.current = null;
+    setCloudSubjectSync(null);
     setAuthProvider("demo");
     setAuthNotice("");
+    setStorageMessage("");
     const loadedStudent = loadStudentSettings({
       ...student,
       sessions: Array.isArray(student.sessions) ? [...student.sessions] : [],
@@ -97,23 +141,67 @@ export default function App() {
     setLoggedIn(true);
   };
 
-  const handleSupabaseAuth = useCallback((user) => {
+  const handleSupabaseAuth = useCallback(async (user) => {
     if (!user?.id || activeAuthUserId.current === user.id) return;
     activeAuthUserId.current = user.id;
     setAuthProvider("supabase");
+    setCloudSubjectSync({ userId: user.id, loaded: false, baseline: [], error: false });
     setAuthNotice("");
     const loadedStudent = loadStudentSettings({
       ...createAuthenticatedStudent(user),
       sessions: [],
     });
+    let cloudSubjects;
+    try {
+      cloudSubjects = await loadCloudSubjects(user.id);
+    } catch {
+      if (activeAuthUserId.current !== user.id) return;
+      const onboarding = loadStudentOnboarding(loadedStudent.id);
+      const hasExistingRecords = Object.keys(loadedStudent.grades || {}).length > 0
+        || loadedStudent.sessions.length > 0;
+      setCurrentStudent({
+        ...loadedStudent,
+        targets: getStudentTargets(loadedStudent),
+        onboardingStep: onboarding.step,
+      });
+      setCloudSubjectSync({ userId: user.id, loaded: false, baseline: [], error: true });
+      setStorageMessage("Could not load subjects from Supabase. Local subjects were kept and nothing was uploaded.");
+      setOnboardingOpen(!onboarding.complete && !hasExistingRecords);
+      setLoggedIn(true);
+      return;
+    }
+
+    if (activeAuthUserId.current !== user.id) return;
+    const localSubjects = loadedStudent.subjects;
+    const subjects = cloudSubjects.length ? cloudSubjects : localSubjects;
+    let migrationFailed = false;
+    if (!cloudSubjects.length && localSubjects.length) {
+      try {
+        await saveCloudSubjects(user.id, localSubjects);
+      } catch {
+        migrationFailed = true;
+      }
+    }
+    if (activeAuthUserId.current !== user.id) return;
+
     const onboarding = loadStudentOnboarding(loadedStudent.id);
     const hasExistingRecords = Object.keys(loadedStudent.grades || {}).length > 0
       || loadedStudent.sessions.length > 0;
     setCurrentStudent({
       ...loadedStudent,
+      subjects,
       targets: getStudentTargets(loadedStudent),
       onboardingStep: onboarding.step,
     });
+    setCloudSubjectSync({
+      userId: user.id,
+      loaded: true,
+      baseline: subjects,
+      error: migrationFailed,
+    });
+    setStorageMessage(migrationFailed
+      ? "Could not sync local subjects to Supabase. Your local subject list is still saved."
+      : "");
     setOnboardingOpen(!onboarding.complete && !hasExistingRecords);
     setLoggedIn(true);
   }, []);
@@ -126,6 +214,7 @@ export default function App() {
         handleSupabaseAuth(session.user);
       } else if (event === "SIGNED_OUT") {
         activeAuthUserId.current = null;
+        setCloudSubjectSync(null);
         setAuthProvider(null);
         setCurrentStudent(null);
         setOnboardingOpen(false);
@@ -179,6 +268,7 @@ export default function App() {
       }
     }
     activeAuthUserId.current = null;
+    setCloudSubjectSync(null);
     setAuthProvider(null);
     setCurrentStudent(null);
     setLoggedIn(false);
