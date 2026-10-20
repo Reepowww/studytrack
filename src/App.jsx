@@ -22,6 +22,12 @@ import {
   normalizeCloudSubjectNames,
   saveCloudSubjects,
 } from "./data/cloudSubjects.js";
+import {
+  gradeDataSnapshot,
+  loadCloudGrades,
+  resolveCloudGradeData,
+  saveCloudGrades,
+} from "./data/cloudGrades.js";
 import { supabase } from "./lib/supabase.js";
 
 const PAGES = {
@@ -54,6 +60,7 @@ export default function App() {
   const [authNotice, setAuthNotice] = useState("");
   const [cloudSubjectSync, setCloudSubjectSync] = useState(null);
   const activeAuthUserId = useRef(null);
+  const cloudSaveQueueRef = useRef(Promise.resolve());
 
   useEffect(() => {
     if (!currentStudent) return;
@@ -84,19 +91,42 @@ export default function App() {
   ]);
 
   useEffect(() => {
-    if (authProvider !== "supabase" || !currentStudent || !cloudSubjectSync?.loaded
+    if (authProvider !== "supabase" || !currentStudent
+      || !cloudSubjectSync?.subjectsLoaded || !cloudSubjectSync?.gradesLoaded
       || cloudSubjectSync.userId !== activeAuthUserId.current
       || currentStudent.id !== `supabase_${cloudSubjectSync.userId}`) return undefined;
 
     const names = Array.isArray(currentStudent.subjects) ? currentStudent.subjects : [];
-    if (JSON.stringify(names) === JSON.stringify(cloudSubjectSync.baseline)) return undefined;
+    const subjectsChanged = JSON.stringify(names)
+      !== JSON.stringify(cloudSubjectSync.baselineSubjects);
+    const nextGradeSnapshot = gradeDataSnapshot(currentStudent);
+    const gradesChanged = nextGradeSnapshot !== cloudSubjectSync.baselineGrades;
+    if (!subjectsChanged && !gradesChanged) return undefined;
 
     const { userId } = cloudSubjectSync;
+    const studentSnapshot = {
+      ...currentStudent,
+      subjects: names,
+      grades: currentStudent.grades || {},
+      previousGrades: currentStudent.previousGrades || {},
+      targets: currentStudent.targets || {},
+      periodGrades: currentStudent.periodGrades || {},
+    };
     const timeout = window.setTimeout(() => {
-      saveCloudSubjects(userId, names).then(() => {
+      if (activeAuthUserId.current !== userId) return;
+      cloudSaveQueueRef.current = cloudSaveQueueRef.current.catch(() => {}).then(async () => {
+        if (activeAuthUserId.current !== userId) return;
+        if (subjectsChanged) await saveCloudSubjects(userId, names);
+        if (activeAuthUserId.current !== userId) return;
+        if (gradesChanged) await saveCloudGrades(userId, studentSnapshot);
         if (activeAuthUserId.current !== userId) return;
         setCloudSubjectSync((current) => current?.userId === userId
-          ? { ...current, baseline: normalizeCloudSubjectNames(names), error: false }
+          ? {
+            ...current,
+            baselineSubjects: normalizeCloudSubjectNames(names),
+            baselineGrades: nextGradeSnapshot,
+            error: false,
+          }
           : current);
         setStorageMessage("");
       }).catch(() => {
@@ -104,7 +134,7 @@ export default function App() {
         setCloudSubjectSync((current) => current?.userId === userId
           ? { ...current, error: true }
           : current);
-        setStorageMessage("Could not sync subjects to Supabase. Your local subject list is still saved.");
+        setStorageMessage("Could not sync subjects or grades to Supabase. Your local data is still saved.");
       });
     }, 500);
 
@@ -113,8 +143,15 @@ export default function App() {
     authProvider,
     currentStudent?.id,
     currentStudent?.subjects,
-    cloudSubjectSync?.baseline,
-    cloudSubjectSync?.loaded,
+    currentStudent?.grades,
+    currentStudent?.previousGrades,
+    currentStudent?.targets,
+    currentStudent?.periodGrades,
+    currentStudent?.termStructure,
+    cloudSubjectSync?.baselineSubjects,
+    cloudSubjectSync?.baselineGrades,
+    cloudSubjectSync?.subjectsLoaded,
+    cloudSubjectSync?.gradesLoaded,
     cloudSubjectSync?.userId,
   ]);
 
@@ -145,7 +182,14 @@ export default function App() {
     if (!user?.id || activeAuthUserId.current === user.id) return;
     activeAuthUserId.current = user.id;
     setAuthProvider("supabase");
-    setCloudSubjectSync({ userId: user.id, loaded: false, baseline: [], error: false });
+    setCloudSubjectSync({
+      userId: user.id,
+      subjectsLoaded: false,
+      gradesLoaded: false,
+      baselineSubjects: [],
+      baselineGrades: "",
+      error: false,
+    });
     setAuthNotice("");
     const loadedStudent = loadStudentSettings({
       ...createAuthenticatedStudent(user),
@@ -164,7 +208,14 @@ export default function App() {
         targets: getStudentTargets(loadedStudent),
         onboardingStep: onboarding.step,
       });
-      setCloudSubjectSync({ userId: user.id, loaded: false, baseline: [], error: true });
+      setCloudSubjectSync({
+        userId: user.id,
+        subjectsLoaded: false,
+        gradesLoaded: false,
+        baselineSubjects: [],
+        baselineGrades: "",
+        error: true,
+      });
       setStorageMessage("Could not load subjects from Supabase. Local subjects were kept and nothing was uploaded.");
       setOnboardingOpen(!onboarding.complete && !hasExistingRecords);
       setLoggedIn(true);
@@ -172,36 +223,70 @@ export default function App() {
     }
 
     if (activeAuthUserId.current !== user.id) return;
-    const localSubjects = loadedStudent.subjects;
-    const subjects = cloudSubjects.length ? cloudSubjects : localSubjects;
-    let migrationFailed = false;
-    if (!cloudSubjects.length && localSubjects.length) {
-      try {
-        await saveCloudSubjects(user.id, localSubjects);
-      } catch {
-        migrationFailed = true;
-      }
-    }
-    if (activeAuthUserId.current !== user.id) return;
-
-    const onboarding = loadStudentOnboarding(loadedStudent.id);
-    const hasExistingRecords = Object.keys(loadedStudent.grades || {}).length > 0
-      || loadedStudent.sessions.length > 0;
-    setCurrentStudent({
+    const localStudent = {
       ...loadedStudent,
-      subjects,
       targets: getStudentTargets(loadedStudent),
+    };
+    let cloudGrades;
+    try {
+      cloudGrades = await loadCloudGrades(user.id);
+    } catch {
+      if (activeAuthUserId.current !== user.id) return;
+      const subjects = cloudSubjects.length ? cloudSubjects : localStudent.subjects;
+      const onboarding = loadStudentOnboarding(localStudent.id);
+      const hasExistingRecords = Object.keys(localStudent.grades || {}).length > 0
+        || localStudent.sessions.length > 0;
+      setCurrentStudent({ ...localStudent, subjects, onboardingStep: onboarding.step });
+      setCloudSubjectSync({
+        userId: user.id,
+        subjectsLoaded: true,
+        gradesLoaded: false,
+        baselineSubjects: cloudSubjects,
+        baselineGrades: "",
+        error: true,
+      });
+      setStorageMessage("Could not load grades from Supabase. Local data was kept and nothing was uploaded.");
+      setOnboardingOpen(!onboarding.complete && !hasExistingRecords);
+      setLoggedIn(true);
+      return;
+    }
+
+    if (activeAuthUserId.current !== user.id) return;
+    const subjects = cloudSubjects.length ? cloudSubjects : localStudent.subjects;
+    const localGradeData = {
+      grades: localStudent.grades || {},
+      previousGrades: localStudent.previousGrades || {},
+      targets: localStudent.targets || {},
+      periodGrades: localStudent.periodGrades || {},
+      termStructure: localStudent.termStructure,
+    };
+    const resolvedGrades = resolveCloudGradeData(cloudGrades, localGradeData);
+    const student = {
+      ...localStudent,
+      subjects,
+      ...resolvedGrades.data,
+    };
+    const onboarding = loadStudentOnboarding(student.id);
+    const hasExistingRecords = Object.keys(student.grades || {}).length > 0
+      || student.sessions.length > 0;
+    const cloudSubjectBaseline = cloudSubjects;
+    const cloudGradeBaseline = resolvedGrades.cloudHasData
+      || resolvedGrades.shouldUploadLocal
+      ? gradeDataSnapshot(cloudGrades)
+      : gradeDataSnapshot(student);
+    setCurrentStudent({
+      ...student,
       onboardingStep: onboarding.step,
     });
     setCloudSubjectSync({
       userId: user.id,
-      loaded: true,
-      baseline: subjects,
-      error: migrationFailed,
+      subjectsLoaded: true,
+      gradesLoaded: true,
+      baselineSubjects: cloudSubjectBaseline,
+      baselineGrades: cloudGradeBaseline,
+      error: false,
     });
-    setStorageMessage(migrationFailed
-      ? "Could not sync local subjects to Supabase. Your local subject list is still saved."
-      : "");
+    setStorageMessage("");
     setOnboardingOpen(!onboarding.complete && !hasExistingRecords);
     setLoggedIn(true);
   }, []);

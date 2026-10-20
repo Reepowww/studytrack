@@ -275,7 +275,7 @@ export default function AcademicPerformance({ currentStudent, setCurrentStudent,
           </div>
           {averageChange !== null && <div className="page-pill academic-change">{averageChange >= 0 ? "+" : ""}{averageChange.toFixed(1)} average change across subjects with two recorded grades</div>}
 
-          <div className="goal-section-heading"><div><h3>Subject Goals &amp; Progress</h3><p className="muted">Targets are optional personal goals. No target or missing grade is treated as zero.</p></div></div>
+          <div className="goal-section-heading"><div><h3>Subject Goals &amp; Progress</h3><p className="muted">Targets are optional personal goals. A missing grade or target is shown as not recorded.</p></div></div>
           <div className="goal-grid">
             {subjectProgress.map((progress) => {
               const hasCurrent = Number.isFinite(progress.currentGrade);
