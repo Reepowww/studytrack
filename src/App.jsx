@@ -28,6 +28,12 @@ import {
   resolveCloudGradeData,
   saveCloudGrades,
 } from "./data/cloudGrades.js";
+import {
+  loadCloudStudy,
+  pickHabits,
+  saveCloudStudy,
+  studyDataSnapshot,
+} from "./data/cloudStudy.js";
 import { supabase } from "./lib/supabase.js";
 
 const PAGES = {
@@ -59,6 +65,7 @@ export default function App() {
   const [authProvider, setAuthProvider] = useState(null);
   const [authNotice, setAuthNotice] = useState("");
   const [cloudSubjectSync, setCloudSubjectSync] = useState(null);
+  const [studySync, setStudySync] = useState(null);
   const activeAuthUserId = useRef(null);
   const cloudSaveQueueRef = useRef(Promise.resolve());
 
@@ -155,9 +162,82 @@ export default function App() {
     cloudSubjectSync?.userId,
   ]);
 
+  // Load sessions and habits once per sign-in, after subjects and grades have loaded
+  useEffect(() => {
+    const userId = cloudSubjectSync?.userId;
+    if (authProvider !== "supabase" || !userId || !cloudSubjectSync?.gradesLoaded
+      || studySync?.userId === userId) return undefined;
+    let cancelled = false;
+    loadCloudStudy(userId).then((cloud) => {
+      if (cancelled || activeAuthUserId.current !== userId) return;
+      setCurrentStudent((student) => {
+        if (!student || student.id !== `supabase_${userId}`) return student;
+        return cloud
+          ? { ...student, sessions: cloud.sessions, ...pickHabits(cloud.habits) }
+          : student; // nothing in the cloud yet: keep local data, it uploads below
+      });
+      setStudySync({
+        userId,
+        loaded: true,
+        baseline: cloud
+          ? studyDataSnapshot({ sessions: cloud.sessions, ...pickHabits(cloud.habits) })
+          : "",
+        error: false,
+      });
+    }).catch(() => {
+      if (cancelled || activeAuthUserId.current !== userId) return;
+      setStudySync({ userId, loaded: false, baseline: "", error: true });
+      setStorageMessage("Could not load study sessions from Supabase. Local data was kept and nothing was uploaded.");
+    });
+    return () => { cancelled = true; };
+  }, [authProvider, cloudSubjectSync?.userId, cloudSubjectSync?.gradesLoaded, studySync?.userId]);
+
+  // Save sessions and habits whenever they change
+  useEffect(() => {
+    if (authProvider !== "supabase" || !currentStudent || !studySync?.loaded
+      || studySync.userId !== activeAuthUserId.current
+      || currentStudent.id !== `supabase_${studySync.userId}`) return undefined;
+
+    const snapshot = studyDataSnapshot(currentStudent);
+    if (snapshot === studySync.baseline) return undefined;
+
+    const { userId } = studySync;
+    const studentSnapshot = currentStudent;
+    const timeout = window.setTimeout(() => {
+      if (activeAuthUserId.current !== userId) return;
+      cloudSaveQueueRef.current = cloudSaveQueueRef.current.catch(() => {}).then(async () => {
+        if (activeAuthUserId.current !== userId) return;
+        await saveCloudStudy(userId, studentSnapshot);
+        if (activeAuthUserId.current !== userId) return;
+        setStudySync((current) => current?.userId === userId
+          ? { ...current, baseline: snapshot, error: false }
+          : current);
+        setStorageMessage("");
+      }).catch(() => {
+        if (activeAuthUserId.current !== userId) return;
+        setStudySync((current) => current?.userId === userId ? { ...current, error: true } : current);
+        setStorageMessage("Could not sync study sessions to Supabase. Your local data is still saved.");
+      });
+    }, 500);
+
+    return () => window.clearTimeout(timeout);
+  }, [
+    authProvider,
+    currentStudent?.id,
+    currentStudent?.sessions,
+    currentStudent?.weeklyHours,
+    currentStudent?.studyFrequency,
+    currentStudent?.focusLevel,
+    currentStudent?.preferredMethod,
+    studySync?.loaded,
+    studySync?.baseline,
+    studySync?.userId,
+  ]);
+
   const handleLogin = (student) => {
     activeAuthUserId.current = null;
     setCloudSubjectSync(null);
+    setStudySync(null);
     setAuthProvider("demo");
     setAuthNotice("");
     setStorageMessage("");
@@ -182,6 +262,7 @@ export default function App() {
     if (!user?.id || activeAuthUserId.current === user.id) return;
     activeAuthUserId.current = user.id;
     setAuthProvider("supabase");
+    setStudySync(null);
     setCloudSubjectSync({
       userId: user.id,
       subjectsLoaded: false,
@@ -300,6 +381,7 @@ export default function App() {
       } else if (event === "SIGNED_OUT") {
         activeAuthUserId.current = null;
         setCloudSubjectSync(null);
+        setStudySync(null);
         setAuthProvider(null);
         setCurrentStudent(null);
         setOnboardingOpen(false);
@@ -354,6 +436,7 @@ export default function App() {
     }
     activeAuthUserId.current = null;
     setCloudSubjectSync(null);
+    setStudySync(null);
     setAuthProvider(null);
     setCurrentStudent(null);
     setLoggedIn(false);
