@@ -17,6 +17,7 @@ import {
   setStudentTermStructure,
   validateSubjectName,
 } from "../data/studentData.js";
+import { calculateTermGwa, getSubjectGradePlan } from "../data/gradePlanning.js";
 
 const formatSessionDate = (date) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return date;
@@ -56,7 +57,22 @@ export default function AcademicPerformance({ currentStudent, setCurrentStudent,
     }));
   const subjectProgress = getStudentSubjectProgress(me);
   const termStructure = TERM_STRUCTURES[me.termStructure] ? me.termStructure : DEFAULT_TERM_STRUCTURE;
-  const periods = TERM_STRUCTURES[termStructure].periods;
+  const structure = TERM_STRUCTURES[termStructure];
+  const terms = structure.terms;
+  const [selectedTermId, setSelectedTermId] = useState(terms[0]?.id || "");
+  const activeTermId = terms.some(({ id }) => id === selectedTermId) ? selectedTermId : terms[0]?.id || "";
+  const activeTerm = terms.find(({ id }) => id === activeTermId);
+  const allPeriods = structure.periods;
+  const periods = allPeriods.filter(({ termId }) => termId === activeTermId);
+  const gradeSettings = me.gradeSettings && typeof me.gradeSettings === "object" ? me.gradeSettings : {};
+  const passingGrade = isValidTargetGrade(gradeSettings.passingGrade) ? Number(gradeSettings.passingGrade) : 75;
+  const termGwa = calculateTermGwa({
+    subjects,
+    termId: activeTermId,
+    periods,
+    periodGrades,
+    gradeSettings,
+  });
 
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ subject: subjects[0] || "", grade: "" });
@@ -70,6 +86,24 @@ export default function AcademicPerformance({ currentStudent, setCurrentStudent,
   const [targetDrafts, setTargetDrafts] = useState({});
   const [targetErrors, setTargetErrors] = useState({});
   const [saveFeedback, setSaveFeedback] = useState("");
+  const [passingGradeDraft, setPassingGradeDraft] = useState(String(passingGrade));
+
+  useEffect(() => {
+    setPassingGradeDraft(String(passingGrade));
+  }, [passingGrade]);
+
+  useEffect(() => {
+    if (!terms.some(({ id }) => id === selectedTermId)) setSelectedTermId(terms[0]?.id || "");
+  }, [terms, selectedTermId]);
+
+  const updateGradeSettings = (update) => {
+    setCurrentStudent((student) => ({
+      ...student,
+      gradeSettings: update(student.gradeSettings && typeof student.gradeSettings === "object"
+        ? student.gradeSettings
+        : {}),
+    }));
+  };
 
   useEffect(() => {
     if (!saveFeedback) return undefined;
@@ -232,6 +266,56 @@ export default function AcademicPerformance({ currentStudent, setCurrentStudent,
     setSaveFeedback(value === "" ? "Period grade cleared." : "Period grade updated.");
   };
 
+  const updatePeriodWeight = (subject, period, value) => {
+    if (value !== "" && (!Number.isFinite(Number(value)) || Number(value) < 0 || Number(value) > 100)) return;
+    updateGradeSettings((settings) => ({
+      ...settings,
+      weights: {
+        ...(settings.weights || {}),
+        [subject]: {
+          ...(settings.weights?.[subject] || {}),
+          [activeTermId]: {
+            ...(settings.weights?.[subject]?.[activeTermId] || {}),
+            [period]: value,
+          },
+        },
+      },
+    }));
+  };
+
+  const updateCourseUnits = (subject, value) => {
+    if (value !== "" && (!Number.isFinite(Number(value)) || Number(value) <= 0 || Number(value) > 100)) return;
+    updateGradeSettings((settings) => ({
+      ...settings,
+      units: { ...(settings.units || {}), [subject]: value },
+    }));
+  };
+
+  const updateManualGwa = (value) => {
+    if (value !== "" && (!Number.isFinite(Number(value)) || Number(value) < 0 || Number(value) > 100)) return;
+    updateGradeSettings((settings) => ({
+      ...settings,
+      manualGwa: {
+        ...(settings.manualGwa || {}),
+        [activeTermId]: value,
+      },
+    }));
+  };
+
+  const updateGwaMode = (mode) => {
+    updateGradeSettings((settings) => ({ ...settings, gwaMode: mode }));
+  };
+
+  const commitPassingGrade = () => {
+    if (!isValidTargetGrade(passingGradeDraft)) {
+      setPassingGradeDraft(String(passingGrade));
+      setGradeError("Enter a passing target from 0 to 100.");
+      return;
+    }
+    updateGradeSettings((settings) => ({ ...settings, passingGrade: Number(passingGradeDraft) }));
+    setGradeError("");
+  };
+
   return (
     <div className="page-enter">
       <div className="page-heading-row">
@@ -244,14 +328,14 @@ export default function AcademicPerformance({ currentStudent, setCurrentStudent,
         <div className="academic-actions">
           <button className="btn-secondary-light" onClick={onReplayOnboarding}>Replay setup</button>
           <button className="btn-primary" onClick={() => setShowForm((visible) => !visible)} disabled={!subjects.length}>
-            {showForm ? "Cancel" : "Update Grade"}
+            {showForm ? "Cancel" : "Update Current Grades"}
           </button>
         </div>
       </div>
 
       {showForm && (
         <div className="card form-card">
-          <div className="card-heading"><div><h4>Update Current Grade</h4><span className="muted">This legacy current-grade entry is separate from period grades below.</span></div></div>
+          <div className="card-heading"><div><h4>Update Current Grades</h4><span className="muted">These optional overall grades are separate from the term-period grades below, which power grade planning and period-based suggestions.</span></div></div>
           <form onSubmit={updateGrade}>
             <label htmlFor="current-grade-subject">Subject</label>
             <select id="current-grade-subject" value={form.subject} onChange={(event) => setForm({ ...form, subject: event.target.value })}>
@@ -268,7 +352,7 @@ export default function AcademicPerformance({ currentStudent, setCurrentStudent,
       {subjects.length ? (
         <>
           <div className="grid grid-4">
-            <div className="card stat-card hover-card"><div className="stat-label">Average Grade</div><div className="stat-value">{currentValues.length ? studentAverage(me).toFixed(1) : "—"}</div><div className="stat-sub">recorded current grades</div></div>
+            <div className="card stat-card hover-card"><div className="stat-label">Average Current Grades</div><div className="stat-value">{currentValues.length ? studentAverage(me).toFixed(1) : "—"}</div><div className="stat-sub">separate from selected-term grades</div></div>
             <div className="card stat-card hover-card"><div className="stat-label">Highest Grade</div><div className="stat-value">{currentValues.length ? Math.max(...currentValues) : "—"}</div><div className="stat-sub">recorded current grade</div></div>
             <div className="card stat-card hover-card"><div className="stat-label">Lowest Grade</div><div className="stat-value">{currentValues.length ? Math.min(...currentValues) : "—"}</div><div className="stat-sub">recorded current grade</div></div>
             <div className="card stat-card hover-card"><div className="stat-label">Subjects Tracked</div><div className="stat-value">{subjects.length}</div><div className="stat-sub">active subjects</div></div>
@@ -342,40 +426,141 @@ export default function AcademicPerformance({ currentStudent, setCurrentStudent,
           </div>
 
           <div className="card chart-card">
-            <div className="card-heading"><div><h4>Current Grades by Subject</h4><span className="muted">Only recorded values are plotted.</span></div></div>
+          <div className="card-heading"><div><h4>Current Grades by Subject</h4><span className="muted">Optional overall grades; term grades are shown below.</span></div></div>
             {chartData.length
               ? <ResponsiveContainer width="100%" height={280}><BarChart data={chartData}><CartesianGrid strokeDasharray="3 3" stroke="#eee" /><XAxis dataKey="subject" fontSize={12} /><YAxis fontSize={12} domain={[0, 100]} /><Tooltip /><Bar dataKey="previous" fill="#cce3f0" radius={[6, 6, 0, 0]} name="Previous" /><Bar dataKey="current" fill="#0ea5e9" radius={[6, 6, 0, 0]} name="Current" /></BarChart></ResponsiveContainer>
               : <p className="empty-state-note">No current grades are recorded yet. Add one with “Update Grade” or enter a period grade below.</p>}
           </div>
 
           <div className="card period-grade-card">
-            <div className="card-heading"><div><h4>Academic Period Grades</h4><span className="muted">Enter or edit each period independently. StudyTrack does not calculate a final grade without school-provided weights.</span></div></div>
+            <div className="card-heading"><div><h4>Academic Period Grades</h4><span className="muted">Enter the grades you have received for the selected term. Period grades remain separate records.</span></div></div>
             <div className="term-settings">
               <label htmlFor="term-structure">Academic calendar</label>
               <select id="term-structure" value={termStructure} onChange={(event) => changeTermStructure(event.target.value)}>
                 {Object.entries(TERM_STRUCTURES).map(([key, structure]) => <option key={key} value={key}>{structure.label}</option>)}
               </select>
+              <label htmlFor="academic-term">Term</label>
+              <select id="academic-term" value={activeTermId} onChange={(event) => setSelectedTermId(event.target.value)}>
+                {terms.map((term) => <option key={term.id} value={term.id}>{term.label}</option>)}
+              </select>
               <button type="button" className="btn-secondary-light" onClick={onReplayOnboarding}>Review setup</button>
             </div>
-            <p className="term-explanation">{termStructure === "dualSemester"
-              ? "Dual Semester has separate Prelim, Midterm, and Finals records for Semester 1 and Semester 2."
-              : "Trimester uses three explicitly named trimester records. Semester grades stay saved under their original names and are not relabeled."}</p>
+            <p className="term-explanation">{activeTerm?.label} periods are entered manually. Choose a calendar that matches your school; changing calendars keeps saved grades under their original period IDs.</p>
             {Object.values(periodGrades).reduce((total, subjectPeriods) =>
-              total + Object.keys(subjectPeriods || {}).filter((periodId) => !periods.some((period) => period.id === periodId)).length, 0) > 0
-              && <p className="term-explanation">Some saved grades belong to a different calendar structure. They remain stored and will appear again if you switch back.</p>}
+              total + Object.keys(subjectPeriods || {}).filter((periodId) => !allPeriods.some((period) => period.id === periodId)).length, 0) > 0
+              && <p className="term-explanation">Some saved grades belong to another calendar structure. They remain stored and will appear again if you switch back.</p>}
             <div className="table-wrap">
               <table className="data-table period-grade-table">
-                <thead><tr><th>Subject</th>{periods.map((period) => <th key={period.id}>{period.label}</th>)}</tr></thead>
+                <thead><tr><th>Subject</th>{periods.map((period) => <th key={period.id}>{period.name || period.label}</th>)}</tr></thead>
                 <tbody>{subjects.map((subject) => (
                   <tr key={subject}><th scope="row">{subject}</th>{periods.map((period) => (
-                    <td key={period.id}><label className="visually-hidden" htmlFor={`period-${encodeURIComponent(subject)}-${period.id}`}>{subject}, {period.label} grade</label>
+                    <td key={period.id}><label className="visually-hidden" htmlFor={`period-${encodeURIComponent(subject)}-${period.id}`}>{subject}, {period.name || period.label} grade</label>
                       <input id={`period-${encodeURIComponent(subject)}-${period.id}`} type="number" min="0" max="100" step="any" value={periodGrades[subject]?.[period.id] ?? ""} onChange={(event) => updatePeriodGrade(subject, period.id, event.target.value)} placeholder="—" /></td>
                   ))}</tr>
                 ))}</tbody>
               </table>
             </div>
-            <p className="term-explanation">Grades are displayed separately. Add official weighting rules only if your school provides them; no weighted overall grade is calculated here.</p>
+            <p className="term-explanation">Individual period grades are always entered manually. Use the optional planner below only if you know your professor’s official period weights.</p>
           </div>
+
+          <section className="card grade-planner-card">
+            <div className="card-heading">
+              <div><h4>Grade Planner &amp; GWA</h4><span className="muted">Optional estimates for {activeTerm?.label}. These do not change your recorded grades.</span></div>
+            </div>
+            <div className="grade-planner-settings">
+              <div>
+                <label htmlFor="passing-target">Passing target</label>
+                <input
+                  id="passing-target"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="any"
+                  value={passingGradeDraft}
+                  onChange={(event) => setPassingGradeDraft(event.target.value)}
+                  onBlur={commitPassingGrade}
+                />
+              </div>
+              <div>
+                <label htmlFor="gwa-mode">GWA method</label>
+                <select id="gwa-mode" value={gradeSettings.gwaMode === "manual" ? "manual" : "units"} onChange={(event) => updateGwaMode(event.target.value === "manual" ? "manual" : "units")}>
+                  <option value="units">Calculate unit-weighted average (same grade scale)</option>
+                  <option value="manual">Enter my school’s GWA manually</option>
+                </select>
+              </div>
+              <div className="gwa-result" role="status">
+                <span>{gradeSettings.gwaMode === "manual" ? "Entered GWA" : "Unit-weighted average"}</span>
+                <strong>{gradeSettings.gwaMode === "manual"
+                  ? isValidTargetGrade(gradeSettings.manualGwa?.[activeTermId])
+                    ? Number(gradeSettings.manualGwa[activeTermId]).toFixed(2)
+                    : "—"
+                  : termGwa.gwa === null ? "—" : termGwa.gwa.toFixed(2)}</strong>
+              </div>
+            </div>
+            {gradeError && <p className="form-error" role="alert">{gradeError}</p>}
+            {gradeSettings.gwaMode === "manual" ? (
+              <div className="manual-gwa-field">
+                <label htmlFor="manual-gwa">Enter {activeTerm?.label} GWA</label>
+                <input id="manual-gwa" type="number" min="0" max="100" step="any" value={gradeSettings.manualGwa?.[activeTermId] ?? ""} onChange={(event) => updateManualGwa(event.target.value)} placeholder="—" />
+              </div>
+            ) : (
+              <>
+                <p className="term-explanation">Set each subject’s official period weights (must total 100%) and course units. New subjects start with an equal split as an editable estimate; verify weights against your professor’s grading policy.</p>
+                <div className="table-wrap">
+                  <table className="data-table grade-plan-table">
+                    <thead><tr><th>Subject</th>{periods.map((period) => <th key={period.id}>{period.name || period.label}<small>Grade · Weight %</small></th>)}<th>Estimate</th><th>Units</th></tr></thead>
+                    <tbody>{subjects.map((subject) => {
+                      const plan = getSubjectGradePlan({
+                        subject,
+                        termId: activeTermId,
+                        periods,
+                        periodGrades: periodGrades[subject] || {},
+                        gradeSettings,
+                      });
+                      return (
+                        <tr key={subject}>
+                          <th scope="row">{subject}</th>
+                          {periods.map((period) => (
+                            <td key={period.id}>
+                              <div className="grade-plan-period">
+                                <span>{isRecordedGrade(periodGrades[subject]?.[period.id])
+                                  ? Number(periodGrades[subject][period.id]).toFixed(1)
+                                  : "—"}</span>
+                                <label className="visually-hidden" htmlFor={`weight-${encodeURIComponent(subject)}-${period.id}`}>{subject}, {period.name || period.label} weight percentage</label>
+                                <input id={`weight-${encodeURIComponent(subject)}-${period.id}`} type="number" min="0" max="100" step="0.1" value={plan.weights[period.id]} onChange={(event) => updatePeriodWeight(subject, period.id, event.target.value)} aria-label={`${subject} ${period.name || period.label} weight percentage`} />
+                              </div>
+                            </td>
+                          ))}
+                          <td className="grade-plan-estimate">
+                            {!plan.weightsValid
+                              ? <span className="form-error">Weights total {plan.weightsTotal}%</span>
+                              : plan.finalGrade !== null
+                                ? <span>Term grade: <b>{plan.finalGrade.toFixed(1)}</b></span>
+                                : plan.requiredAverage === null
+                                  ? <span>Enter grades and weights</span>
+                                  : plan.requiredAverage > 100
+                                    ? <span>Over 100 average needed to reach {passingGrade}</span>
+                                    : plan.requiredAverage <= 0
+                                      ? <span>Even 0 average across remaining periods would meet {passingGrade}</span>
+                                      : <span>Need {plan.requiredAverage.toFixed(1)} avg. across remaining periods to reach {passingGrade}</span>}
+                          </td>
+                          <td><label className="visually-hidden" htmlFor={`units-${encodeURIComponent(subject)}`}>{subject} course units</label>
+                            <input id={`units-${encodeURIComponent(subject)}`} type="number" min="0.1" max="100" step="0.1" value={gradeSettings.units?.[subject] ?? ""} onChange={(event) => updateCourseUnits(subject, event.target.value)} placeholder="—" /></td>
+                        </tr>
+                      );
+                    })}</tbody>
+                  </table>
+                </div>
+                {termGwa.missing.length > 0 && <p className="term-explanation">Calculated GWA appears when every subject has a complete weighted grade for this term and a course-unit value. Still needed for: {termGwa.missing.join(", ")}.</p>}
+              </>
+            )}
+            {gradeSettings.gwaMode !== "manual" && (
+              <p className="term-explanation" role="note">
+                For a representative calculated GWA, add every subject you are taking this term under Manage Subjects, then enter its grades for all periods and its course units. The result stays blank until every tracked subject has complete data, rather than showing a partial average.
+              </p>
+            )}
+            <p className="term-explanation">The unit-weighted average stays on the same 0–100 scale as your subject grades. If your school converts grades to a different GWA scale or uses another formula, choose manual entry. Required-grade figures are estimates and never replace recorded grades.</p>
+          </section>
         </>
       ) : (
         <div className="card empty-state academic-empty-state">

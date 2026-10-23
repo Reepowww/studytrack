@@ -31,6 +31,20 @@ export const recentStudyHours = (sessions, today = new Date(), days = 7) => {
   return Math.round((minutes / 60) * 10) / 10;
 };
 
+export const recentStudySessionCount = (sessions, today = new Date(), days = 7) => {
+  const list = Array.isArray(sessions) ? sessions : [];
+  if (!list.length) return null;
+  const end = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const start = new Date(end);
+  start.setDate(end.getDate() - (days - 1));
+  return list.filter((session) => {
+    const date = parseLocalDate(session?.date);
+    const duration = Number(session?.duration);
+    return date && date >= start && date <= end
+      && Number.isFinite(duration) && duration > 0;
+  }).length;
+};
+
 // Average of the 1-5 focus ratings across all sessions, or null if there are none.
 export const averageSessionFocus = (sessions) => {
   const ratings = (Array.isArray(sessions) ? sessions : [])
@@ -38,4 +52,16 @@ export const averageSessionFocus = (sessions) => {
     .filter((focus) => Number.isFinite(focus) && focus >= 1 && focus <= 5);
   if (!ratings.length) return null;
   return ratings.reduce((total, focus) => total + focus, 0) / ratings.length;
+};
+
+export const mostCommonSessionMethod = (sessions) => {
+  const counts = new Map();
+  for (const session of Array.isArray(sessions) ? sessions : []) {
+    const method = typeof session?.method === "string" ? session.method.trim() : "";
+    if (method) counts.set(method, (counts.get(method) || 0) + 1);
+  }
+  return [...counts.entries()].reduce(
+    (mostCommon, entry) => entry[1] > (mostCommon?.[1] || 0) ? entry : mostCommon,
+    null,
+  )?.[0] || null;
 };

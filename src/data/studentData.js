@@ -1,21 +1,78 @@
 export const TERM_STRUCTURES = {
   dualSemester: {
-    label: "Dual Semester",
+    label: "2 semesters · Prelim, Midterm, Finals",
+    terms: [
+      { id: "semester-1", label: "Semester 1" },
+      { id: "semester-2", label: "Semester 2" },
+    ],
     periods: [
-      { id: "semester-1-prelim", label: "Semester 1 · Prelim" },
-      { id: "semester-1-midterm", label: "Semester 1 · Midterm" },
-      { id: "semester-1-finals", label: "Semester 1 · Finals" },
-      { id: "semester-2-prelim", label: "Semester 2 · Prelim" },
-      { id: "semester-2-midterm", label: "Semester 2 · Midterm" },
-      { id: "semester-2-finals", label: "Semester 2 · Finals" },
+      { id: "semester-1-prelim", termId: "semester-1", name: "Prelim", label: "Semester 1 · Prelim" },
+      { id: "semester-1-midterm", termId: "semester-1", name: "Midterm", label: "Semester 1 · Midterm" },
+      { id: "semester-1-finals", termId: "semester-1", name: "Finals", label: "Semester 1 · Finals" },
+      { id: "semester-2-prelim", termId: "semester-2", name: "Prelim", label: "Semester 2 · Prelim" },
+      { id: "semester-2-midterm", termId: "semester-2", name: "Midterm", label: "Semester 2 · Midterm" },
+      { id: "semester-2-finals", termId: "semester-2", name: "Finals", label: "Semester 2 · Finals" },
+    ],
+  },
+  dualSemesterMidFinal: {
+    label: "2 semesters · Midterm, Finals",
+    terms: [
+      { id: "semester-1", label: "Semester 1" },
+      { id: "semester-2", label: "Semester 2" },
+    ],
+    periods: [
+      { id: "semester-1-midterm", termId: "semester-1", name: "Midterm", label: "Semester 1 · Midterm" },
+      { id: "semester-1-finals", termId: "semester-1", name: "Finals", label: "Semester 1 · Finals" },
+      { id: "semester-2-midterm", termId: "semester-2", name: "Midterm", label: "Semester 2 · Midterm" },
+      { id: "semester-2-finals", termId: "semester-2", name: "Finals", label: "Semester 2 · Finals" },
+    ],
+  },
+  trimesterThreePeriods: {
+    label: "3 terms · Prelim, Midterm, Finals",
+    terms: [
+      { id: "trimester-1", label: "Term 1" },
+      { id: "trimester-2", label: "Term 2" },
+      { id: "trimester-3", label: "Term 3" },
+    ],
+    periods: [
+      { id: "trimester-1-prelim", termId: "trimester-1", name: "Prelim", label: "Term 1 · Prelim" },
+      { id: "trimester-1-midterm", termId: "trimester-1", name: "Midterm", label: "Term 1 · Midterm" },
+      { id: "trimester-1-finals", termId: "trimester-1", name: "Finals", label: "Term 1 · Finals" },
+      { id: "trimester-2-prelim", termId: "trimester-2", name: "Prelim", label: "Term 2 · Prelim" },
+      { id: "trimester-2-midterm", termId: "trimester-2", name: "Midterm", label: "Term 2 · Midterm" },
+      { id: "trimester-2-finals", termId: "trimester-2", name: "Finals", label: "Term 2 · Finals" },
+      { id: "trimester-3-prelim", termId: "trimester-3", name: "Prelim", label: "Term 3 · Prelim" },
+      { id: "trimester-3-midterm", termId: "trimester-3", name: "Midterm", label: "Term 3 · Midterm" },
+      { id: "trimester-3-finals", termId: "trimester-3", name: "Finals", label: "Term 3 · Finals" },
+    ],
+  },
+  trimesterMidFinal: {
+    label: "3 terms · Midterm, Finals",
+    terms: [
+      { id: "trimester-1", label: "Term 1" },
+      { id: "trimester-2", label: "Term 2" },
+      { id: "trimester-3", label: "Term 3" },
+    ],
+    periods: [
+      { id: "trimester-1-midterm", termId: "trimester-1", name: "Midterm", label: "Term 1 · Midterm" },
+      { id: "trimester-1-finals", termId: "trimester-1", name: "Finals", label: "Term 1 · Finals" },
+      { id: "trimester-2-midterm", termId: "trimester-2", name: "Midterm", label: "Term 2 · Midterm" },
+      { id: "trimester-2-finals", termId: "trimester-2", name: "Finals", label: "Term 2 · Finals" },
+      { id: "trimester-3-midterm", termId: "trimester-3", name: "Midterm", label: "Term 3 · Midterm" },
+      { id: "trimester-3-finals", termId: "trimester-3", name: "Finals", label: "Term 3 · Finals" },
     ],
   },
   trimester: {
-    label: "Trimester",
+    label: "Legacy · one grade per trimester",
+    terms: [
+      { id: "trimester-1", label: "Term 1" },
+      { id: "trimester-2", label: "Term 2" },
+      { id: "trimester-3", label: "Term 3" },
+    ],
     periods: [
-      { id: "trimester-1", label: "Trimester 1" },
-      { id: "trimester-2", label: "Trimester 2" },
-      { id: "trimester-3", label: "Trimester 3" },
+      { id: "trimester-1", termId: "trimester-1", name: "Term grade", label: "Trimester 1" },
+      { id: "trimester-2", termId: "trimester-2", name: "Term grade", label: "Trimester 2" },
+      { id: "trimester-3", termId: "trimester-3", name: "Term grade", label: "Trimester 3" },
     ],
   },
 };
@@ -149,6 +206,7 @@ export const loadStudentSettings = (student) => {
   const savedSubjects = readJson(`studytrack:subjects:${id}`);
   const savedTerm = readString(`studytrack:term:${id}`);
   const savedPeriods = readJson(`studytrack:period-grades:${id}`);
+  const savedGradeSettings = readJson(`studytrack:grade-settings:${id}`);
   const validTerm = Object.hasOwn(TERM_STRUCTURES, savedTerm) ? savedTerm : DEFAULT_TERM_STRUCTURE;
   const records = savedRecords && typeof savedRecords === "object" && !Array.isArray(savedRecords)
     ? {
@@ -163,7 +221,13 @@ export const loadStudentSettings = (student) => {
       ...(typeof savedRecords.preferredMethod === "string" ? { preferredMethod: savedRecords.preferredMethod } : {}),
     }
     : {};
-  const loaded = { ...student, ...records };
+  const loaded = {
+    ...student,
+    ...records,
+    ...(savedGradeSettings && typeof savedGradeSettings === "object" && !Array.isArray(savedGradeSettings)
+      ? { gradeSettings: savedGradeSettings }
+      : {}),
+  };
   return {
     ...loaded,
     subjects: Array.isArray(savedSubjects) ? uniqueNames(savedSubjects) : getStudentSubjects(loaded),
@@ -191,6 +255,7 @@ export const saveStudentSettings = (student) => {
       : DEFAULT_TERM_STRUCTURE;
     localStorage.setItem(`studytrack:term:${student.id}`, termStructure);
     localStorage.setItem(`studytrack:period-grades:${student.id}`, JSON.stringify(student.periodGrades || {}));
+    localStorage.setItem(`studytrack:grade-settings:${student.id}`, JSON.stringify(student.gradeSettings || {}));
   } catch {
     return false;
   }
@@ -215,6 +280,33 @@ export const hasRecordedSubjectData = (student, subject) => {
 export const requiresSubjectDeletionConfirmation = (student, subject, hasFocusPlan = false) =>
   hasRecordedSubjectData(student, subject) || hasFocusPlan;
 
+const renameSubjectGradeSettings = (settings, oldName, newName) => {
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) return settings || {};
+  const next = { ...settings };
+  for (const key of ["weights", "units"]) {
+    if (next[key] && typeof next[key] === "object" && !Array.isArray(next[key])) {
+      next[key] = { ...next[key] };
+      if (Object.hasOwn(next[key], oldName)) {
+        if (!Object.hasOwn(next[key], newName)) next[key][newName] = next[key][oldName];
+        delete next[key][oldName];
+      }
+    }
+  }
+  return next;
+};
+
+const removeSubjectGradeSettings = (settings, subject) => {
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) return settings || {};
+  const next = { ...settings };
+  for (const key of ["weights", "units"]) {
+    if (next[key] && typeof next[key] === "object" && !Array.isArray(next[key])) {
+      next[key] = { ...next[key] };
+      delete next[key][subject];
+    }
+  }
+  return next;
+};
+
 export const renameStudentSubject = (student, oldName, newName) => {
   const renameKey = (record) => {
     if (!record || typeof record !== "object" || Array.isArray(record)) return record || {};
@@ -232,6 +324,7 @@ export const renameStudentSubject = (student, oldName, newName) => {
     previousGrades: renameKey(student.previousGrades),
     targets: renameKey(student.targets),
     periodGrades: renameKey(student.periodGrades),
+    gradeSettings: renameSubjectGradeSettings(student.gradeSettings, oldName, newName),
     sessions: (Array.isArray(student.sessions) ? student.sessions : []).map((session) =>
       session?.subject === oldName ? { ...session, subject: newName } : session),
   };
@@ -251,6 +344,7 @@ export const deleteStudentSubject = (student, subject) => {
     previousGrades: removeKey(student.previousGrades),
     targets: removeKey(student.targets),
     periodGrades: removeKey(student.periodGrades),
+    gradeSettings: removeSubjectGradeSettings(student.gradeSettings, subject),
     sessions: (Array.isArray(student.sessions) ? student.sessions : [])
       .filter((session) => session?.subject !== subject),
   };

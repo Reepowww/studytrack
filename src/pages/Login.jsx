@@ -2,7 +2,7 @@ import { useState } from "react";
 import { students } from "../data/students.js";
 import { supabase } from "../lib/supabase.js";
 
-export default function Login({ onLogin, onSignUp, onSupabaseAuth, authNotice }) {
+export default function Login({ onLogin, onSignUp, onForgotPassword, onSupabaseAuth, authNotice }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -154,6 +154,7 @@ export default function Login({ onLogin, onSignUp, onSupabaseAuth, authNotice })
               onChange={(e) => setPassword(e.target.value)}
               required
             />
+            {supabase && <button type="button" className="auth-link login-forgot-link" onClick={onForgotPassword}>Forgot password?</button>}
             {error && <p className="login-error">{error}</p>}
             <button type="submit" className="btn-primary login-button" disabled={loading}>
               {loading && <span className="spinner" />}

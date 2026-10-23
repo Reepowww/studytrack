@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { methods, averageSessionDuration, getMostStudiedSubject, sessionHours } from "../data/students.js";
 import { getStudentSubjects } from "../data/studentData.js";
+import { formatStudyTimerElapsed, getStudyTimerElapsedMs, restoreStudyTimer } from "../data/studyTimer.js";
 
 const formatSessionDate = (date) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return date;
@@ -14,6 +15,16 @@ export default function StudyHabits({ currentStudent, setCurrentStudent, setPage
   const subjects = getStudentSubjects(currentStudent);
   const defaultSubject = subjects[0] || "";
   const [form, setForm] = useState({ subject: defaultSubject, duration: 60, method: methods[0], focus: 3 });
+  const timerStorageKey = `studytrack:timer:${currentStudent.id}`;
+  const [timer, setTimer] = useState(() => {
+    try {
+      return restoreStudyTimer(JSON.parse(localStorage.getItem(timerStorageKey) || "null"));
+    } catch {
+      return null;
+    }
+  });
+  const [timerNow, setTimerNow] = useState(Date.now);
+  const [timerMessage, setTimerMessage] = useState("");
   const [editingSessionId, setEditingSessionId] = useState(null);
   const [deleteSessionId, setDeleteSessionId] = useState(null);
   const [saveMessage, setSaveMessage] = useState("");
@@ -46,6 +57,168 @@ export default function StudyHabits({ currentStudent, setCurrentStudent, setPage
     && Number.isFinite(Number(session.duration)) && Number(session.duration) > 0);
   const avgFocus = focusValues.length ? focusValues.reduce((total, focus) => total + focus, 0) / focusValues.length : null;
   const mostStudied = getMostStudiedSubject(sessions);
+  const timerElapsedMs = timer ? getStudyTimerElapsedMs(timer, timerNow) : 0;
+
+  useEffect(() => {
+    if (!timer) return undefined;
+    try {
+      localStorage.setItem(timerStorageKey, JSON.stringify(timer));
+    } catch {
+      setTimerMessage("Timer storage is unavailable. Keep this tab open or your timer may be lost.");
+    }
+    return undefined;
+  }, [timer, timerStorageKey]);
+
+  useEffect(() => {
+    if (timer?.recovered) {
+      setTimerMessage("An unfinished timer was restored as paused. Resume it or finish and save the session.");
+      setTimer((current) => current ? { ...current, recovered: false } : current);
+    }
+  }, [timer?.recovered]);
+
+  useEffect(() => {
+    if (!timer || timer.status !== "running") return undefined;
+    const updateTimer = () => {
+      const now = Date.now();
+      setTimerNow(now);
+      try {
+        localStorage.setItem(timerStorageKey, JSON.stringify({
+          ...timer,
+          accumulatedMs: getStudyTimerElapsedMs(timer, now),
+          runningSince: now,
+        }));
+      } catch {
+        setTimerMessage("Timer storage is unavailable. Keep this tab open or your timer may be lost.");
+      }
+    };
+    const interval = window.setInterval(updateTimer, 1000);
+    window.addEventListener("focus", updateTimer);
+    document.addEventListener("visibilitychange", updateTimer);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", updateTimer);
+      document.removeEventListener("visibilitychange", updateTimer);
+    };
+  }, [timer, timerStorageKey]);
+
+  useEffect(() => {
+    const restoreOnPageShow = () => {
+      try {
+        const savedTimer = restoreStudyTimer(JSON.parse(localStorage.getItem(timerStorageKey) || "null"));
+        if (savedTimer?.status === "paused") {
+          setTimer(savedTimer);
+          setTimerNow(Date.now());
+        }
+      } catch {
+        setTimerMessage("Could not restore the timer from browser storage.");
+      }
+    };
+    window.addEventListener("pageshow", restoreOnPageShow);
+    return () => window.removeEventListener("pageshow", restoreOnPageShow);
+  }, [timerStorageKey]);
+
+  useEffect(() => {
+    if (!timer || timer.status !== "running") return undefined;
+    const pauseOnPageExit = () => {
+      const now = Date.now();
+      const pausedTimer = {
+        ...timer,
+        status: "paused",
+        accumulatedMs: getStudyTimerElapsedMs(timer, now),
+        runningSince: null,
+        recovered: false,
+      };
+      try {
+        localStorage.setItem(timerStorageKey, JSON.stringify(pausedTimer));
+      } catch {
+        setTimerMessage("Timer storage is unavailable. The timer may not be recoverable if you close this page.");
+      }
+    };
+    window.addEventListener("pagehide", pauseOnPageExit);
+    return () => window.removeEventListener("pagehide", pauseOnPageExit);
+  }, [timer, timerStorageKey]);
+
+  const startTimer = () => {
+    const focus = Number(form.focus);
+    if (!form.subject || !subjects.includes(form.subject)
+      || !methods.includes(form.method) || !Number.isFinite(focus) || focus < 1 || focus > 5) return;
+    const now = Date.now();
+    setTimer({
+      subject: form.subject,
+      method: form.method,
+      focus,
+      status: "running",
+      accumulatedMs: 0,
+      runningSince: now,
+      startedAt: now,
+      recovered: false,
+    });
+    setTimerNow(Date.now());
+    setTimerMessage("");
+  };
+
+  const pauseTimer = () => {
+    if (!timer || timer.status !== "running") return;
+    const now = Date.now();
+    setTimer({
+      ...timer,
+      status: "paused",
+      accumulatedMs: getStudyTimerElapsedMs(timer, now),
+      runningSince: null,
+      recovered: false,
+    });
+    setTimerNow(now);
+  };
+
+  const resumeTimer = () => {
+    if (!timer || timer.status !== "paused") return;
+    setTimer({ ...timer, status: "running", runningSince: Date.now(), recovered: false });
+    setTimerNow(Date.now());
+    setTimerMessage("");
+  };
+
+  const finishTimer = () => {
+    if (!timer) return;
+    if (!subjects.includes(timer.subject)) {
+      setTimerMessage("This timer's subject was removed. Delete the timer and choose an available subject.");
+      return;
+    }
+    const duration = Math.max(1, Math.round(getStudyTimerElapsedMs(timer) / 60_000));
+    const startedAt = new Date(timer.startedAt || Date.now());
+    const today = `${startedAt.getFullYear()}-${String(startedAt.getMonth() + 1).padStart(2, "0")}-${String(startedAt.getDate()).padStart(2, "0")}`;
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const newSession = {
+      id,
+      date: today,
+      subject: timer.subject,
+      duration,
+      method: timer.method,
+      focus: timer.focus,
+    };
+    try {
+      localStorage.removeItem(timerStorageKey);
+    } catch {
+      setTimerMessage("Could not clear the timer from browser storage, so the session was not saved. Please retry.");
+      return;
+    }
+    setCurrentStudent((student) => ({
+      ...student,
+      sessions: [newSession, ...(Array.isArray(student.sessions) ? student.sessions : [])],
+    }));
+    setTimerMessage(`Study session saved: ${timer.subject}, ${duration} min.`);
+    setTimer(null);
+  };
+
+  const discardTimer = () => {
+    try {
+      localStorage.removeItem(timerStorageKey);
+      setTimerMessage("Timer discarded without saving a study session.");
+    } catch {
+      setTimerMessage("Could not clear the timer from browser storage.");
+      return;
+    }
+    setTimer(null);
+  };
 
   const saveSession = (event) => {
     event.preventDefault();
@@ -141,6 +314,61 @@ export default function StudyHabits({ currentStudent, setCurrentStudent, setPage
         <div className="page-pill">{sessions.length} sessions logged</div>
       </div>
 
+      <div className="card study-timer-card">
+        <div className="card-heading">
+          <div><h4>Study Timer</h4><span className="muted">Track a study session and save it to your log when you finish.</span></div>
+          <span className="chart-badge">{timer?.status === "running" ? "running" : timer?.status === "paused" ? "paused" : "ready"}</span>
+        </div>
+        <div className="study-timer-controls">
+          <div className="study-timer-subject">
+            <label htmlFor="study-timer-subject">Subject</label>
+            <select
+              id="study-timer-subject"
+              value={timer?.subject || form.subject}
+              onChange={(event) => setForm((current) => ({ ...current, subject: event.target.value }))}
+              disabled={Boolean(timer) || !subjects.length}
+            >
+              {subjects.length ? subjects.map((subject) => <option key={subject} value={subject}>{subject}</option>) : <option value="">Add a subject first</option>}
+            </select>
+          </div>
+          <div className="study-timer-subject">
+            <label htmlFor="study-timer-method">Study method</label>
+            <select
+              id="study-timer-method"
+              value={timer?.method || form.method}
+              onChange={(event) => setForm((current) => ({ ...current, method: event.target.value }))}
+              disabled={Boolean(timer)}
+            >
+              {methods.map((method) => <option key={method} value={method}>{method}</option>)}
+            </select>
+          </div>
+          <div className="study-timer-subject study-timer-focus">
+            <label htmlFor="study-timer-focus">Focus (1-5)</label>
+            <input
+              id="study-timer-focus"
+              type="number"
+              min="1"
+              max="5"
+              value={timer?.focus ?? form.focus}
+              onChange={(event) => setForm((current) => ({ ...current, focus: event.target.value }))}
+              disabled={Boolean(timer)}
+            />
+          </div>
+          <output className="study-timer-display" aria-label="Elapsed study time" aria-live="off">
+            {formatStudyTimerElapsed(timerElapsedMs)}
+          </output>
+          <div className="study-timer-actions">
+            {!timer && <button type="button" className="btn-primary" onClick={startTimer} disabled={!subjects.length}>Start</button>}
+            {timer?.status === "running" && <button type="button" className="btn-secondary-light" onClick={pauseTimer}>Pause</button>}
+            {timer?.status === "paused" && <button type="button" className="btn-primary" onClick={resumeTimer}>Resume</button>}
+            {timer && <button type="button" className="btn-primary" onClick={finishTimer}>Stop &amp; Save</button>}
+            {timer && <button type="button" className="saved-focus-delete" onClick={discardTimer}>Discard</button>}
+          </div>
+        </div>
+        {timerMessage && <p className={/^(Could not|This timer|Timer storage)/.test(timerMessage) ? "form-error" : "save-feedback"} role={/^(Could not|This timer|Timer storage)/.test(timerMessage) ? "alert" : "status"}>{timerMessage}</p>}
+        <p className="study-timer-note">Time is counted only while the timer is running. Leaving or reloading the page pauses it; resume or save it when you return. Durations are rounded to the nearest minute.</p>
+      </div>
+
       <div className="grid grid-4">
         <div className="card stat-card hover-card"><div className="stat-label">Total Sessions</div><div className="stat-value">{sessions.length}</div><div className="stat-sub">recorded</div></div>
         <div className="card stat-card hover-card"><div className="stat-label">Logged Study Time</div><div className="stat-value">{hasDurationData ? `${sessionHours(sessions).toFixed(1)} hrs` : "—"}</div><div className="stat-sub">from sessions</div></div>
@@ -151,7 +379,7 @@ export default function StudyHabits({ currentStudent, setCurrentStudent, setPage
       <div className="grid grid-2">
         {!isEditing && (
           <div className="card form-card">
-            <div className="card-heading"><div><h4>Log a Study Session</h4><span className="muted">Add a real session to update your snapshot.</span></div></div>
+            <div className="card-heading"><div><h4>Log a Study Session</h4><span className="muted">Add a real session to update your study summary.</span></div></div>
             {subjects.length ? renderSessionForm(false) : <div className="empty-state-note">Add a subject before logging a session. <button type="button" className="inline-link" onClick={() => setPage?.("performance")}>Manage subjects</button></div>}
           </div>
         )}

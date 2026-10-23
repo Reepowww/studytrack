@@ -58,7 +58,10 @@ export const buildRecommendations = (student = {}, now = new Date(), selectedPer
     : {};
   const records = {
     ...source,
-    grades: toScoreMap(source.grades),
+    grades: toScoreMap(selectedPeriodId
+      ? Object.fromEntries(getPeriodGradeRows(source, selectedPeriodId).recordedRows
+        .map(({ subject, grade }) => [subject, grade]))
+      : source.grades),
     previousGrades: toScoreMap(source.previousGrades),
     subjects: getStudentSubjects(source),
     targets: Object.fromEntries(Object.entries(sourceTargets)
@@ -165,7 +168,7 @@ export const buildRecommendations = (student = {}, now = new Date(), selectedPer
     });
   }
 
-  const improvedSubjects = Object.entries(records.grades)
+  const improvedSubjects = selectedPeriodId ? [] : Object.entries(records.grades)
     .filter(([subject, grade]) => Number.isFinite(records.previousGrades[subject])
       && grade > records.previousGrades[subject])
     .map(([subject, grade]) => ({
