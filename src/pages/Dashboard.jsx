@@ -8,6 +8,7 @@ import {
   getMostStudiedSubject, getSubjectHours, getStudyStreak, getStudentSubjectProgress,
 } from "../data/students.js";
 import { getStudentSubjects, isRecordedGrade } from "../data/studentData.js";
+import { averageSessionFocus, recentStudyHours } from "../data/sessionStats.js";
 
 export default function Dashboard({ currentStudent, setPage }) {
   const me = currentStudent;
@@ -27,6 +28,11 @@ export default function Dashboard({ currentStudent, setPage }) {
   const topSubject = [...grades].sort((a, b) => Number(b[1]) - Number(a[1]))[0];
   const weakestSubject = [...grades].sort((a, b) => Number(a[1]) - Number(b[1]))[0];
   const latestWeek = validWeeks[validWeeks.length - 1];
+  const hasRecordedWeek = isRecordedGrade(latestWeek);
+  const sessionHours = hasRecordedWeek ? null : recentStudyHours(sessions);
+  const recordedFocus = me.focusLevel !== null && me.focusLevel !== undefined && me.focusLevel !== ""
+    && Number.isFinite(Number(me.focusLevel)) ? Number(me.focusLevel) : null;
+  const focusRating = recordedFocus ?? averageSessionFocus(sessions);
   const streak = getStudyStreak(sessions);
   const subjectProgress = getStudentSubjectProgress(me);
   const needsAttention = subjectProgress.filter((progress) => ["recommended", "attention"].includes(progress.status));
@@ -48,7 +54,7 @@ export default function Dashboard({ currentStudent, setPage }) {
 
       <div className="section-title">Study Overview</div>
       <div className="grid grid-4">
-        <StatCard label="Hours This Week" value={isRecordedGrade(latestWeek) ? `${latestWeek} hrs` : "—"} sub="latest recorded week" />
+        <StatCard label="Hours This Week" value={hasRecordedWeek ? `${latestWeek} hrs` : sessionHours !== null ? `${sessionHours} hrs` : "—"} sub={!hasRecordedWeek && sessionHours !== null ? "last 7 days of sessions" : "latest recorded week"} />
         <StatCard label="Sessions Logged" value={sessions.length} sub="total recorded" />
         <StatCard label="Avg. Session" value={sessions.length ? `${Math.round(averageDuration)} min` : "—"} sub="per session" />
         <StatCard label="Most Studied" value={getMostStudiedSubject(sessions)} sub="by time logged" />
@@ -59,7 +65,7 @@ export default function Dashboard({ currentStudent, setPage }) {
         <StatCard label="Overall Average" value={grades.length ? studentAverage(me).toFixed(1) : "—"} sub="recorded current grades" />
         <StatCard label="Highest" value={topSubject?.[0] || "—"} sub={topSubject ? `grade: ${topSubject[1]}` : "no grade recorded"} />
         <StatCard label="Needs Work" value={weakestSubject?.[0] || "—"} sub={weakestSubject ? `grade: ${weakestSubject[1]}` : "no grade recorded"} />
-        <StatCard label="Focus Rating" value={me.focusLevel !== null && me.focusLevel !== undefined && me.focusLevel !== "" && Number.isFinite(Number(me.focusLevel)) ? `${Number(me.focusLevel).toFixed(1)} / 5` : "—"} sub="self-rated avg" />
+        <StatCard label="Focus Rating" value={focusRating !== null ? `${focusRating.toFixed(1)} / 5` : "—"} sub={recordedFocus === null && focusRating !== null ? "avg of session ratings" : "self-rated avg"} />
       </div>
 
       <div className="goal-focus-heading">
