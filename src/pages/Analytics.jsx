@@ -9,6 +9,18 @@ import { DEFAULT_TERM_STRUCTURE, TERM_STRUCTURES } from "../data/studentData.js"
 
 const hasGradeValue = isValidAcademicGrade;
 
+const SubjectScatterTooltip = ({ active, payload, xLabel, yLabel }) => {
+  if (!active || !payload?.length) return null;
+  const { name, x, y } = payload[0].payload;
+  return (
+    <div className="recharts-default-tooltip subject-scatter-tooltip">
+      <p className="subject-scatter-tooltip-name">{name}</p>
+      <p>{xLabel}: {Number(x).toFixed(1)}</p>
+      <p>{yLabel}: {Number(y).toFixed(1)}</p>
+    </div>
+  );
+};
+
 export default function Analytics({ currentStudent, setPage }) {
   const me = currentStudent;
   const termStructure = TERM_STRUCTURES[me.termStructure] ? me.termStructure : DEFAULT_TERM_STRUCTURE;
@@ -146,14 +158,14 @@ export default function Analytics({ currentStudent, setPage }) {
       </div>
 
       <div className="card chart-card">
-        <div className="card-heading"><div><h4>All Logged Study Time vs Current Grade</h4><span className="muted">All dated session records compared descriptively with the separate current-grade snapshot; they are not period-aligned.</span></div><span className="correlation-badge">{hoursVsGrade.length > 1 ? `r = ${corrHours.toFixed(2)}` : "r = —"}</span></div>
+        <div className="card-heading"><div><h4>All Logged Study Time vs Current Grade</h4><span className="muted">All dated sessions compared descriptively with the overall current grade; these aren’t matched to a specific academic period.</span></div><span className="correlation-badge">{hoursVsGrade.length > 1 ? `r = ${corrHours.toFixed(2)}` : "r = —"}</span></div>
         {hoursVsGrade.length ? <ResponsiveContainer width="100%" height={280}>
           <ScatterChart>
             <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
             <XAxis type="number" dataKey="x" name="Study Hours" fontSize={12} label={{ value: "Logged study hours", position: "insideBottom", offset: -5, fontSize: 12 }} />
             <YAxis type="number" dataKey="y" name="Subject Grade" fontSize={12} domain={[0, 100]} />
             <ZAxis range={[80, 80]} />
-            <Tooltip cursor={{ strokeDasharray: "3 3" }} formatter={(value) => Number(value).toFixed(1)} />
+            <Tooltip cursor={{ strokeDasharray: "3 3" }} content={<SubjectScatterTooltip xLabel="Study hours" yLabel="Grade" />} />
             <Scatter data={hoursVsGrade} fill="#5b5bd6" />
           </ScatterChart>
         </ResponsiveContainer> : <p className="empty-state-note">Add current grades for subjects to compare them with logged study time.</p>}
@@ -162,10 +174,10 @@ export default function Analytics({ currentStudent, setPage }) {
 
       <div className="grid grid-2">
       <div className="card chart-card"><div className="card-heading"><div><h4>All Logged Sessions vs Current Grade</h4><span className="muted">Session count and current grade by subject; records are not period-aligned.</span></div><span className="correlation-badge">{freqVsGrade.length > 1 ? `r = ${corrFreq.toFixed(2)}` : "r = —"}</span></div>
-          {freqVsGrade.length ? <ResponsiveContainer width="100%" height={220}><ScatterChart><CartesianGrid strokeDasharray="3 3" stroke="#eee" /><XAxis type="number" dataKey="x" name="Sessions" fontSize={12} /><YAxis type="number" dataKey="y" name="Grade" fontSize={12} domain={[0, 100]} /><Tooltip /><Scatter data={freqVsGrade} fill="#0ea5e9" /></ScatterChart></ResponsiveContainer> : <p className="empty-state-note">Add recorded grades to compare them with logged sessions.</p>}
+          {freqVsGrade.length ? <ResponsiveContainer width="100%" height={220}><ScatterChart><CartesianGrid strokeDasharray="3 3" stroke="#eee" /><XAxis type="number" dataKey="x" name="Sessions" fontSize={12} /><YAxis type="number" dataKey="y" name="Grade" fontSize={12} domain={[0, 100]} /><Tooltip content={<SubjectScatterTooltip xLabel="Sessions" yLabel="Grade" />} /><Scatter data={freqVsGrade} fill="#0ea5e9" /></ScatterChart></ResponsiveContainer> : <p className="empty-state-note">Add recorded grades to compare them with logged sessions.</p>}
         </div>
         <div className="card chart-card"><div className="card-heading"><div><h4>Session Focus vs Current Grade</h4><span className="muted">Average logged focus and current grade by subject; records are not period-aligned.</span></div><span className="correlation-badge">{focusVsGrade.length > 1 ? `r = ${corrFocus.toFixed(2)}` : "r = —"}</span></div>
-          {focusVsGrade.length ? <ResponsiveContainer width="100%" height={220}><ScatterChart><CartesianGrid strokeDasharray="3 3" stroke="#eee" /><XAxis type="number" dataKey="x" name="Avg. Focus" fontSize={12} domain={[1, 5]} /><YAxis type="number" dataKey="y" name="Grade" fontSize={12} domain={[0, 100]} /><Tooltip /><Scatter data={focusVsGrade} fill="#38bdf8" /></ScatterChart></ResponsiveContainer> : <p className="empty-state-note">Record study-session focus and a grade to compare these values.</p>}
+          {focusVsGrade.length ? <ResponsiveContainer width="100%" height={220}><ScatterChart><CartesianGrid strokeDasharray="3 3" stroke="#eee" /><XAxis type="number" dataKey="x" name="Avg. Focus" fontSize={12} domain={[1, 5]} /><YAxis type="number" dataKey="y" name="Grade" fontSize={12} domain={[0, 100]} /><Tooltip content={<SubjectScatterTooltip xLabel="Avg. focus" yLabel="Grade" />} /><Scatter data={focusVsGrade} fill="#38bdf8" /></ScatterChart></ResponsiveContainer> : <p className="empty-state-note">Record study-session focus and a grade to compare these values.</p>}
         </div>
       </div>
 

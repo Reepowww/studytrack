@@ -1,11 +1,16 @@
 import { useEffect, useState } from "react";
-import { avg } from "../data/students.js";
 import { buildRecommendations } from "../data/academicInsights.js";
+import {
+  averageSessionFocus,
+  mostCommonSessionMethod,
+  recentStudyHours,
+  recentStudySessionCount,
+} from "../data/sessionStats.js";
 import { TERM_STRUCTURES } from "../data/studentData.js";
 
 export default function Recommendations({ currentStudent, setPage }) {
   const periods = TERM_STRUCTURES[currentStudent?.termStructure]?.periods || [];
-  const [selectedPeriodId, setSelectedPeriodId] = useState("");
+  const [selectedPeriodId, setSelectedPeriodId] = useState(periods[0]?.id || "");
   const validSelectedPeriodId = periods.some(({ id }) => id === selectedPeriodId)
     ? selectedPeriodId
     : "";
@@ -14,12 +19,17 @@ export default function Recommendations({ currentStudent, setPage }) {
     new Date(),
     validSelectedPeriodId,
   );
-  const gradeValues = Object.values(records.grades);
-  const average = gradeValues.length ? avg(gradeValues) : null;
-  const weeklyAverage = records.weeklyHours.length ? avg(records.weeklyHours) : null;
+  const sessions = Array.isArray(currentStudent?.sessions) ? currentStudent.sessions : [];
+  const recentSessionCount = recentStudySessionCount(sessions);
+  const recentHours = recentStudyHours(sessions);
+  const sessionFocus = averageSessionFocus(sessions);
+  const sessionMethod = mostCommonSessionMethod(sessions);
+  const profileWeeklyAverage = records.weeklyHours.length ? avg(records.weeklyHours) : null;
+  const focusLevel = sessionFocus ?? records.focusLevel;
+  const preferredMethod = sessionMethod || records.preferredMethod;
 
   useEffect(() => {
-    if (!periods.some(({ id }) => id === selectedPeriodId)) setSelectedPeriodId("");
+    if (!periods.some(({ id }) => id === selectedPeriodId)) setSelectedPeriodId(periods[0]?.id || "");
   }, [periods, selectedPeriodId]);
 
   return (
@@ -39,16 +49,15 @@ export default function Recommendations({ currentStudent, setPage }) {
       </div>
 
       <div className="card recommendation-period-control">
-        <label htmlFor="recommendation-period">Optional academic period for missing-grade reminders</label>
+        <label htmlFor="recommendation-period">Academic period used for grade suggestions</label>
         <select
           id="recommendation-period"
           value={validSelectedPeriodId}
           onChange={(event) => setSelectedPeriodId(event.target.value)}
         >
-          <option value="">Don't include period records</option>
           {periods.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
         </select>
-        <p className="muted">Period grades are separate from current grades. Choose a period only if you want suggestions about its missing entries.</p>
+        <p className="muted">Grade-based suggestions use only the selected period’s manually recorded grades. They do not treat grades from other periods as current.</p>
       </div>
 
       <div className="recommendation-grid">
@@ -69,16 +78,21 @@ export default function Recommendations({ currentStudent, setPage }) {
 
       <div className="card snapshot-card">
         <div className="card-heading">
-          <div><h4>Your Snapshot</h4><span className="muted">Valid recorded values for this student only.</span></div>
+          <div><h4>Your Summary</h4><span className="muted">Summary of your study habits.</span></div>
         </div>
+        <p className="muted">Study frequency and time use sessions from the last 7 days. Focus and preferred method summarize all saved sessions with those details.</p>
         <ul className="detail-list">
-          <li><span>Academic Average (recorded current grades)</span><b>{average === null ? "—" : average.toFixed(1)}</b></li>
-          <li><span>Study Frequency</span><b>{records.studyFrequency !== null && records.studyFrequency !== ""
-            && Number.isFinite(Number(records.studyFrequency)) ? `${records.studyFrequency}x/week` : "—"}</b></li>
-          <li><span>Average Weekly Study Time</span><b>{weeklyAverage === null ? "—" : `${weeklyAverage.toFixed(1)} hrs`}</b></li>
-          <li><span>Focus Level</span><b>{records.focusLevel !== null && records.focusLevel !== ""
-            && Number.isFinite(Number(records.focusLevel)) ? `${Number(records.focusLevel).toFixed(1)} / 5` : "—"}</b></li>
-          <li><span>Preferred Method</span><b>{records.preferredMethod || "—"}</b></li>
+          <li><span>Study Frequency (last 7 days)</span><b>{recentSessionCount !== null
+            ? `${recentSessionCount} ${recentSessionCount === 1 ? "session" : "sessions"}`
+            : records.studyFrequency !== null && records.studyFrequency !== ""
+              && Number.isFinite(Number(records.studyFrequency))
+              ? `${records.studyFrequency}x/week` : "Not recorded"}</b></li>
+          <li><span>Study Time (last 7 days)</span><b>{recentHours !== null
+            ? `${recentHours.toFixed(1)} hrs`
+            : profileWeeklyAverage === null ? "Not recorded" : `${profileWeeklyAverage.toFixed(1)} hrs/week`}</b></li>
+          <li><span>Average Focus Level</span><b>{focusLevel !== null && focusLevel !== ""
+            && Number.isFinite(Number(focusLevel)) ? `${Number(focusLevel).toFixed(1)} / 5` : "Not recorded"}</b></li>
+          <li><span>Most Used Study Method</span><b>{preferredMethod || "Not recorded"}</b></li>
         </ul>
       </div>
     </div>

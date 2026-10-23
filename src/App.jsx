@@ -3,12 +3,14 @@ import Sidebar from "./components/Sidebar.jsx";
 import Onboarding from "./components/Onboarding.jsx";
 import Login from "./pages/Login.jsx";
 import SignUp from "./pages/SignUp.jsx";
+import ForgotPassword from "./pages/ForgotPassword.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import StudyHabits from "./pages/StudyHabits.jsx";
 import AcademicPerformance from "./pages/AcademicPerformance.jsx";
 import Analytics from "./pages/Analytics.jsx";
 import Recommendations from "./pages/Recommendations.jsx";
 import About from "./pages/About.jsx";
+import Account from "./pages/Account.jsx";
 import { createAuthenticatedStudent } from "./data/authProfile.js";
 import {
   completeStudentOnboarding,
@@ -43,6 +45,7 @@ const PAGES = {
   analytics: Analytics,
   recommendations: Recommendations,
   about: About,
+  account: Account,
 };
 
 const getStudentTargets = (student) => {
@@ -90,6 +93,7 @@ export default function App() {
     currentStudent?.grades,
     currentStudent?.previousGrades,
     currentStudent?.sessions,
+    currentStudent?.gradeSettings,
     currentStudent?.weeklyHours,
     currentStudent?.studyFrequency,
     currentStudent?.focusLevel,
@@ -141,7 +145,7 @@ export default function App() {
         setCloudSubjectSync((current) => current?.userId === userId
           ? { ...current, error: true }
           : current);
-        setStorageMessage("Could not sync subjects or grades to Supabase. Your local data is still saved.");
+        setStorageMessage("Could not sync subjects, grades, or planner settings to Supabase. Your local data is still saved.");
       });
     }, 500);
 
@@ -154,6 +158,7 @@ export default function App() {
     currentStudent?.previousGrades,
     currentStudent?.targets,
     currentStudent?.periodGrades,
+    currentStudent?.gradeSettings,
     currentStudent?.termStructure,
     cloudSubjectSync?.baselineSubjects,
     cloudSubjectSync?.baselineGrades,
@@ -377,6 +382,7 @@ export default function App() {
     let active = true;
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (session?.user) {
+        if (event === "PASSWORD_RECOVERY") setPage("account");
         handleSupabaseAuth(session.user);
       } else if (event === "SIGNED_OUT") {
         activeAuthUserId.current = null;
@@ -447,22 +453,34 @@ export default function App() {
   };
 
   if (!loggedIn) {
-    return authPage === "signup"
-      ? <SignUp
+    if (authPage === "signup") {
+      return <SignUp
         onBackToLogin={() => setAuthPage("login")}
         onSupabaseAuth={handleSupabaseAuth}
         authNotice={authNotice}
-      />
-      : <Login
-        onLogin={handleLogin}
-        onSignUp={() => setAuthPage("signup")}
-        onSupabaseAuth={handleSupabaseAuth}
-        authNotice={authNotice}
       />;
+    }
+    if (authPage === "forgot-password") {
+      return <ForgotPassword onBackToLogin={() => setAuthPage("login")} />;
+    }
+    return <Login
+      onLogin={handleLogin}
+      onSignUp={() => setAuthPage("signup")}
+      onForgotPassword={() => setAuthPage("forgot-password")}
+      onSupabaseAuth={handleSupabaseAuth}
+      authNotice={authNotice}
+    />;
   }
 
   const Page = PAGES[page];
-  const pageProps = { currentStudent, setCurrentStudent, setPage, onReplayOnboarding: replayOnboarding };
+  const pageProps = {
+    currentStudent,
+    setCurrentStudent,
+    setPage,
+    authProvider,
+    onLogout: handleLogout,
+    onReplayOnboarding: replayOnboarding,
+  };
 
   return (
     <div className="app-shell">

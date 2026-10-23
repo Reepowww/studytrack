@@ -128,7 +128,7 @@ export default function Onboarding({ student, setStudent, onComplete, onSkip }) 
         {step === 1 && (
           <>
             <h2 id="onboarding-title">Choose your academic calendar</h2>
-            <p className="muted">This controls the period labels for future grade entries. StudyTrack will not invent a final grade or assume grading weights.</p>
+            <p className="muted">Choose the terms and grading periods your school uses. You can enter grades manually and configure optional estimates later.</p>
             <label htmlFor="onboarding-term">Academic calendar</label>
             <select id="onboarding-term" value={termStructure} onChange={(event) => updateTermStructure(event.target.value)}>
               {Object.entries(TERM_STRUCTURES).map(([key, structure]) => <option key={key} value={key}>{structure.label}</option>)}

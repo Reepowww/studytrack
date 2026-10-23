@@ -57,6 +57,7 @@ test("loadCloudGrades omits nulls instead of converting them to zero", async () 
     previousGrades: { Mathematics: 78 },
     targets: {},
     periodGrades: { Mathematics: { "semester-1-prelim": 0 } },
+    gradeSettings: {},
     termStructure: "dualSemester",
   });
 });
@@ -67,6 +68,7 @@ test("cloud grade data takes precedence and empty local data is not an upload ca
     previousGrades: {},
     targets: {},
     periodGrades: {},
+    gradeSettings: {},
     termStructure: "dualSemester",
   };
   const local = {
@@ -74,17 +76,18 @@ test("cloud grade data takes precedence and empty local data is not an upload ca
     previousGrades: {},
     targets: {},
     periodGrades: {},
+    gradeSettings: {},
     termStructure: "trimester",
   };
   const result = resolveCloudGradeData(cloud, local);
 
-  assert.equal(result.data, cloud);
+  assert.deepEqual(result.data, { ...cloud, gradeSettings: {} });
   assert.equal(result.shouldUploadLocal, false);
   assert.equal(resolveCloudGradeData(local, local).shouldUploadLocal, false);
-  assert.equal(resolveCloudGradeData(cloud, {
+  assert.deepEqual(resolveCloudGradeData(cloud, {
     ...local,
     grades: {},
-  }).data, cloud);
+  }).data, { ...cloud, gradeSettings: {} });
   assert.equal(resolveCloudGradeData(cloud, {
     ...local,
     targets: { Mathematics: 90 },
@@ -105,6 +108,71 @@ test("cloud term structure is retained when neither side has academic entries", 
     targets: {},
     periodGrades: {},
     termStructure: "dualSemester",
+  });
+
+  test("local planner settings are retained and queued when cloud planner rows are incomplete", () => {
+    const result = resolveCloudGradeData({
+      grades: { Mathematics: 82 },
+      previousGrades: {},
+      targets: {},
+      periodGrades: {},
+      gradeSettings: { passingGrade: 75, gwaMode: "units" },
+      termStructure: "dualSemester",
+    }, {
+      grades: {},
+      previousGrades: {},
+      targets: {},
+      periodGrades: {},
+      gradeSettings: {
+        passingGrade: 80,
+        gwaMode: "manual",
+        units: { Mathematics: 3 },
+      },
+      termStructure: "dualSemester",
+    });
+
+    assert.deepEqual(result.data.gradeSettings, {
+      passingGrade: 75,
+      gwaMode: "units",
+      units: { Mathematics: 3 },
+    });
+    assert.equal(result.shouldUploadLocal, true);
+  });
+
+  test("loadCloudGrades restores preferences and subject planner settings", async () => {
+    const { client } = createMockClient([
+      { data: [], error: null },
+      { data: [], error: null },
+      { data: { term_structure: "dualSemester" }, error: null },
+      {
+        data: {
+          passing_grade: 80,
+          gwa_mode: "manual",
+          manual_gwa: { "semester-1": 1.75 },
+        },
+        error: null,
+      },
+      {
+        data: [{
+          units: "3",
+          weights: { "semester-1": { "semester-1-prelim": 30, "semester-1-midterm": 30, "semester-1-finals": 40 } },
+          subjects: { name: "Mathematics" },
+        }],
+        error: null,
+      },
+    ]);
+    const { loadCloudGrades } = createCloudGradesApi(client);
+
+    const loaded = await loadCloudGrades("user-123");
+    assert.deepEqual(loaded.gradeSettings, {
+      passingGrade: 80,
+      gwaMode: "manual",
+      manualGwa: { "semester-1": 1.75 },
+      weights: {
+        Mathematics: { "semester-1": { "semester-1-prelim": 30, "semester-1-midterm": 30, "semester-1-finals": 40 } },
+      },
+      units: { Mathematics: 3 },
+    });
   });
 
   assert.equal(result.data.termStructure, "trimester");
@@ -153,6 +221,71 @@ test("saveCloudGrades rejects prefixed ids and invalid grades", async () => {
     grades: { Mathematics: 101 },
     termStructure: "dualSemester",
   }), /between 0 and 100/);
+});
+
+test("saveCloudGrades writes planner preferences and settings keyed by subject id", async () => {
+  const { client, calls } = createMockClient([
+    { data: [{ id: 12, name: "Mathematics" }], error: null },
+    { data: null, error: null },
+    { data: [], error: null },
+    { data: null, error: null },
+    { data: null, error: null },
+    { data: null, error: null },
+  ]);
+  const { saveCloudGrades } = createCloudGradesApi(client);
+
+  await saveCloudGrades("user-123", {
+    subjects: ["Mathematics"],
+    grades: {},
+    previousGrades: {},
+    targets: {},
+    periodGrades: {},
+    termStructure: "dualSemester",
+    gradeSettings: {
+      passingGrade: 80,
+      gwaMode: "manual",
+      manualGwa: { "semester-1": "1.75" },
+      units: { Mathematics: "3" },
+      weights: {
+        Mathematics: {
+          "semester-1": {
+            "semester-1-prelim": "30",
+            "semester-1-midterm": "30",
+            "semester-1-finals": "40",
+          },
+        },
+      },
+    },
+  });
+
+  assert.deepEqual(calls.find((call) => call[0] === "grade_planner_preferences" && call[1] === "upsert"), [
+    "grade_planner_preferences",
+    "upsert",
+    {
+      user_id: "user-123",
+      passing_grade: 80,
+      gwa_mode: "manual",
+      manual_gwa: { "semester-1": 1.75 },
+    },
+    { onConflict: "user_id" },
+  ]);
+  assert.deepEqual(calls.find((call) => call[0] === "grade_planner_subject_settings" && call[1] === "upsert"), [
+    "grade_planner_subject_settings",
+    "upsert",
+    [{
+      user_id: "user-123",
+      subject_id: 12,
+      units: 3,
+      weights: {
+        "semester-1": {
+          "semester-1-prelim": 30,
+          "semester-1-midterm": 30,
+          "semester-1-finals": 40,
+        },
+      },
+    }],
+    { onConflict: "user_id,subject_id" },
+  ]);
 });
 
 test("loadCloudGrades throws query errors", async () => {

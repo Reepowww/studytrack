@@ -89,6 +89,19 @@ test("period analytics excludes missing and invalid grades while preserving reco
   assert.deepEqual(result.missingSubjects, ["Missing", "Invalid", "High"]);
 });
 
+test("selected-period recommendations use its grades instead of current snapshots", () => {
+  const result = buildRecommendations({
+    termStructure: "dualSemester",
+    subjects: ["Math"],
+    grades: { Math: 99 },
+    targets: { Math: 90 },
+    periodGrades: { Math: { "semester-1-prelim": 72 } },
+  }, new Date("2026-10-20T00:00:00"), "semester-1-prelim");
+  assert.deepEqual(result.records.grades, { Math: 72 });
+  assert.ok(result.recommendations.some(({ id }) => id === "target-next-step"));
+  assert.ok(!result.recommendations.some(({ id }) => id === "targets-met"));
+});
+
 test("renaming a subject preserves grades, targets, periods, and session history", () => {
   const student = {
     subjects: ["Algebra"],
@@ -380,10 +393,31 @@ test("changing an analytics period leaves the saved period records unchanged", (
 test("term structures define explicit periods without converting saved values", () => {
   assert.equal(TERM_STRUCTURES.dualSemester.periods.length, 6);
   assert.equal(TERM_STRUCTURES.trimester.periods.length, 3);
+  assert.equal(TERM_STRUCTURES.dualSemesterMidFinal.periods.length, 4);
+  assert.equal(TERM_STRUCTURES.trimesterThreePeriods.periods.length, 9);
+  assert.equal(TERM_STRUCTURES.trimesterMidFinal.periods.length, 6);
+  assert.equal(TERM_STRUCTURES.dualSemester.terms.length, 2);
+  assert.equal(TERM_STRUCTURES.trimesterMidFinal.terms.length, 3);
   assert.ok(TERM_STRUCTURES.dualSemester.periods.some(({ id }) => id.endsWith("-prelim")));
   assert.ok(TERM_STRUCTURES.dualSemester.periods.some(({ id }) => id.endsWith("-midterm")));
   assert.ok(TERM_STRUCTURES.dualSemester.periods.some(({ id }) => id.endsWith("-finals")));
   assert.notEqual(TERM_STRUCTURES.trimester.periods[0].id, TERM_STRUCTURES.dualSemester.periods[0].id);
+});
+
+test("subject rename and delete preserve cleanup for grade planning settings", () => {
+  const student = {
+    subjects: ["History"],
+    gradeSettings: {
+      units: { History: 3 },
+      weights: { History: { "semester-1": { "semester-1-finals": 100 } } },
+    },
+  };
+  const renamed = renameStudentSubject(student, "History", "Modern History");
+  assert.equal(renamed.gradeSettings.units["Modern History"], 3);
+  assert.equal(renamed.gradeSettings.weights["Modern History"]["semester-1"]["semester-1-finals"], 100);
+  const deleted = deleteStudentSubject(renamed, "Modern History");
+  assert.deepEqual(deleted.gradeSettings.units, {});
+  assert.deepEqual(deleted.gradeSettings.weights, {});
 });
 
 test("period grades edit independently and calendar changes leave historical periods intact", () => {
@@ -431,6 +465,11 @@ test("settings persist separately for each student and tolerate malformed storag
     termStructure: "trimester",
     periodGrades: { Writing: { "trimester-2": 92 } },
     grades: { Writing: 88 },
+    gradeSettings: {
+      passingGrade: 75,
+      units: { Writing: 3 },
+      weights: { Writing: { "trimester-2": { "trimester-2": 100 } } },
+    },
     sessions: [{ id: "session-1", subject: "Writing", duration: 45 }],
   };
   const second = { id: "two", grades: {}, sessions: [] };
@@ -439,6 +478,7 @@ test("settings persist separately for each student and tolerate malformed storag
   assert.equal(loadStudentSettings(first).termStructure, "trimester");
   assert.equal(loadStudentSettings(first).grades.Writing, 88);
   assert.equal(loadStudentSettings(first).sessions[0].duration, 45);
+  assert.deepEqual(loadStudentSettings(first).gradeSettings, first.gradeSettings);
   assert.deepEqual(loadStudentSettings(second).subjects, []);
   assert.deepEqual(loadStudentSettings(second).grades, {});
   values.set("studytrack:subjects:broken", "{");

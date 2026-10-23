@@ -5,6 +5,7 @@ const NAV = [
   { id: "analytics", label: "Analytics", icon: "⌁" },
   { id: "recommendations", label: "Recommendations", icon: "✦" },
   { id: "about", label: "About StudyTrack", icon: "i" },
+  { id: "account", label: "Account", icon: "◉" },
 ];
 
 export default function Sidebar({ page, setPage, open, setOpen }) {

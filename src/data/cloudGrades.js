@@ -5,6 +5,7 @@ const EMPTY_GRADE_DATA = Object.freeze({
   previousGrades: {},
   targets: {},
   periodGrades: {},
+  gradeSettings: {},
   termStructure: "dualSemester",
 });
 
@@ -39,7 +40,7 @@ const addNonNullValue = (target, key, value) => {
 };
 
 const createGradeDataState = (cloud, local) => {
-  const hasData = (data) => {
+  const hasAcademicData = (data) => {
     const hasValues = (values) => Object.values(values || {}).some((value) =>
       value !== null && value !== undefined
       && !(typeof value === "string" && !value.trim())
@@ -50,15 +51,48 @@ const createGradeDataState = (cloud, local) => {
       || Object.values(data?.periodGrades || {}).some(hasValues);
   };
 
-  const cloudHasData = hasData(cloud);
-  const localHasData = hasData(local);
-  return {
-    data: cloudHasData
+  const cloudHasData = hasAcademicData(cloud);
+  const localHasData = hasAcademicData(local);
+  const cloudPlannerHasData = hasGradePlannerData(cloud);
+  const localPlannerHasData = hasGradePlannerData(local);
+  const data = cloudHasData
       ? cloud
       : localHasData
         ? local
         : { ...local, termStructure: cloud?.termStructure || local?.termStructure },
-    shouldUploadLocal: !cloudHasData && localHasData,
+    localSettings = local.gradeSettings || {};
+  const cloudSettings = cloud.gradeSettings || {};
+  const mergedSettings = {
+    ...localSettings,
+    ...cloudSettings,
+  };
+  if (localSettings.units || cloudSettings.units) {
+    mergedSettings.units = { ...(localSettings.units || {}), ...(cloudSettings.units || {}) };
+  }
+  if (localSettings.weights || cloudSettings.weights) {
+    mergedSettings.weights = { ...(localSettings.weights || {}), ...(cloudSettings.weights || {}) };
+    for (const subject of new Set([
+      ...Object.keys(localSettings.weights || {}),
+      ...Object.keys(cloudSettings.weights || {}),
+    ])) {
+      if (localSettings.weights?.[subject] || cloudSettings.weights?.[subject]) {
+        mergedSettings.weights[subject] = {
+          ...(localSettings.weights?.[subject] || {}),
+          ...(cloudSettings.weights?.[subject] || {}),
+        };
+      }
+    }
+  }
+  return {
+    data: {
+      ...data,
+      gradeSettings: mergedSettings,
+    },
+    shouldUploadLocal: (!cloudHasData && localHasData)
+      || (localPlannerHasData && (
+        !cloudPlannerHasData
+        || JSON.stringify(mergedSettings) !== JSON.stringify(cloudSettings)
+      )),
     cloudHasData,
     localHasData,
   };
@@ -71,14 +105,103 @@ const gradeDataSnapshot = (student) => JSON.stringify({
   previousGrades: student?.previousGrades || {},
   targets: student?.targets || {},
   periodGrades: student?.periodGrades || {},
+  gradeSettings: student?.gradeSettings || {},
   termStructure: student?.termStructure || EMPTY_GRADE_DATA.termStructure,
 });
+
+const hasGradePlannerData = (data) => Boolean(data?.gradeSettings)
+  && typeof data.gradeSettings === "object"
+  && Object.keys(data.gradeSettings).length > 0;
+
+const plannerSettingsFromRows = (preference, subjectRows) => {
+  const settings = {};
+  if (preference) {
+    if (preference.passing_grade !== null && preference.passing_grade !== undefined) {
+      settings.passingGrade = Number(preference.passing_grade);
+    }
+    if (preference.gwa_mode === "manual" || preference.gwa_mode === "units") {
+      settings.gwaMode = preference.gwa_mode;
+    }
+    if (preference.manual_gwa && typeof preference.manual_gwa === "object") {
+      settings.manualGwa = preference.manual_gwa;
+    }
+  }
+  const weights = {};
+  const units = {};
+  for (const row of subjectRows || []) {
+    const name = subjectNameFromRelation(row.subjects);
+    if (!name) continue;
+    if (row.weights && typeof row.weights === "object" && Object.keys(row.weights).length) {
+      weights[name] = row.weights;
+    }
+    if (row.units !== null && row.units !== undefined) units[name] = Number(row.units);
+  }
+  if (Object.keys(weights).length) settings.weights = weights;
+  if (Object.keys(units).length) settings.units = units;
+  return settings;
+};
+
+const numericSetting = (value, label, { minimum = 0, maximum = 100, nullable = false } = {}) => {
+  if (value === null || value === undefined || value === "") {
+    if (nullable) return null;
+    return undefined;
+  }
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < minimum || number > maximum) {
+    throw new RangeError(`${label} must be between ${minimum} and ${maximum}.`);
+  }
+  return number;
+};
+
+const normalizePlannerPreferences = (settings = {}) => {
+  const passingGrade = numericSetting(settings.passingGrade, "Passing grade", { nullable: true });
+  const manualGwa = {};
+  for (const [termId, value] of Object.entries(settings.manualGwa || {})) {
+    const number = numericSetting(value, `Manual GWA for ${termId}`, { nullable: true });
+    if (number !== undefined) manualGwa[termId] = number;
+  }
+  return {
+    passing_grade: passingGrade ?? 75,
+    gwa_mode: settings.gwaMode === "manual" ? "manual" : "units",
+    manual_gwa: manualGwa,
+  };
+};
+
+const normalizeSubjectPlannerSettings = (settings = {}, subjects, subjectIds, userId) => {
+  const rows = [];
+  for (const subject of subjects) {
+    const subjectId = subjectIds.get(subject);
+    if (subjectId === undefined || subjectId === null) continue;
+    const units = numericSetting(settings.units?.[subject], `Course units for ${subject}`, {
+      minimum: Number.MIN_VALUE,
+      nullable: true,
+    });
+    const subjectWeights = settings.weights?.[subject] || {};
+    const weights = {};
+    for (const [termId, termWeights] of Object.entries(subjectWeights)) {
+      if (!termWeights || typeof termWeights !== "object" || Array.isArray(termWeights)) continue;
+      weights[termId] = {};
+      for (const [periodId, value] of Object.entries(termWeights)) {
+        weights[termId][periodId] = numericSetting(value, `Weight for ${subject} ${periodId}`, {
+          nullable: true,
+        }) ?? null;
+      }
+    }
+    rows.push({
+      user_id: userId,
+      subject_id: subjectId,
+      units: units ?? null,
+      weights,
+    });
+  }
+  return rows;
+};
 
 export const createCloudGradesApi = (client) => ({
   async loadCloudGrades(userId) {
     validateUserId(userId);
 
-    const [gradeResult, periodResult, profileResult] = await Promise.all([
+    const [gradeResult, periodResult, profileResult, preferenceResult, plannerSubjectResult] = await Promise.all([
       client.from("grades")
         .select("grade,previous_grade,target_grade,subjects(name)")
         .eq("user_id", userId),
@@ -89,10 +212,19 @@ export const createCloudGradesApi = (client) => ({
         .select("term_structure")
         .eq("id", userId)
         .maybeSingle(),
+      client.from("grade_planner_preferences")
+        .select("passing_grade,gwa_mode,manual_gwa")
+        .eq("user_id", userId)
+        .maybeSingle(),
+      client.from("grade_planner_subject_settings")
+        .select("units,weights,subjects(name)")
+        .eq("user_id", userId),
     ]);
     if (gradeResult.error) throw gradeResult.error;
     if (periodResult.error) throw periodResult.error;
     if (profileResult.error) throw profileResult.error;
+    if (preferenceResult.error) throw preferenceResult.error;
+    if (plannerSubjectResult.error) throw plannerSubjectResult.error;
 
     const grades = {};
     const previousGrades = {};
@@ -120,6 +252,7 @@ export const createCloudGradesApi = (client) => ({
       previousGrades,
       targets,
       periodGrades,
+      gradeSettings: plannerSettingsFromRows(preferenceResult.data, plannerSubjectResult.data),
       termStructure: profileResult.data?.term_structure || EMPTY_GRADE_DATA.termStructure,
     };
   },
@@ -203,6 +336,23 @@ export const createCloudGradesApi = (client) => ({
           .in("period_id", removedPeriodIds);
         if (error) throw error;
       }
+    }
+
+    const preference = normalizePlannerPreferences(student.gradeSettings);
+    const { error: preferenceError } = await client.from("grade_planner_preferences")
+      .upsert({ user_id: userId, ...preference }, { onConflict: "user_id" });
+    if (preferenceError) throw preferenceError;
+
+    const plannerRows = normalizeSubjectPlannerSettings(
+      student.gradeSettings,
+      Array.isArray(student.subjects) ? student.subjects : [],
+      subjectIds,
+      userId,
+    );
+    if (plannerRows.length) {
+      const { error: plannerError } = await client.from("grade_planner_subject_settings")
+        .upsert(plannerRows, { onConflict: "user_id,subject_id" });
+      if (plannerError) throw plannerError;
     }
 
     const { error: profileError } = await client.from("profiles")

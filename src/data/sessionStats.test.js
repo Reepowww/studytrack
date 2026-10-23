@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { averageSessionFocus, recentStudyHours } from "./sessionStats.js";
+import {
+  averageSessionFocus,
+  mostCommonSessionMethod,
+  recentStudyHours,
+  recentStudySessionCount,
+} from "./sessionStats.js";
 
 const today = new Date(2026, 9, 23); // 23 Oct 2026
 
@@ -34,6 +39,20 @@ test("recentStudyHours skips bad dates and durations", () => {
   assert.equal(recentStudyHours(sessions, today), 0.8);
 });
 
+test("recentStudySessionCount counts valid sessions in the last seven days", () => {
+  const sessions = [
+    { date: "2026-10-23", duration: 60 },
+    { date: "2026-10-17", duration: 30 },
+    { date: "2026-10-16", duration: 45 },
+    { date: "2026-10-24", duration: 120 },
+    { date: "2026-10-22", duration: 0 },
+    { date: "invalid", duration: 20 },
+  ];
+  assert.equal(recentStudySessionCount(sessions, today), 2);
+  assert.equal(recentStudySessionCount([{ date: "2026-09-01", duration: 60 }], today), 0);
+  assert.equal(recentStudySessionCount([], today), null);
+});
+
 test("averageSessionFocus averages valid 1-5 ratings", () => {
   assert.equal(averageSessionFocus([{ focus: 3 }, { focus: "4" }, { focus: 5 }]), 4);
   assert.equal(averageSessionFocus([{ focus: 2 }, { focus: 3 }]), 2.5);
@@ -42,4 +61,15 @@ test("averageSessionFocus averages valid 1-5 ratings", () => {
 test("averageSessionFocus returns null when nothing valid exists", () => {
   assert.equal(averageSessionFocus([]), null);
   assert.equal(averageSessionFocus([{ focus: "" }, { focus: 9 }, {}, null]), null);
+});
+
+test("mostCommonSessionMethod counts saved methods and handles ties deterministically", () => {
+  assert.equal(mostCommonSessionMethod([
+    { method: "Reading" },
+    { method: "Practice Problems" },
+    { method: "Reading" },
+    { method: "  " },
+  ]), "Reading");
+  assert.equal(mostCommonSessionMethod([{ method: "Reading" }, { method: "Writing" }]), "Reading");
+  assert.equal(mostCommonSessionMethod([]), null);
 });
