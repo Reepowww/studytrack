@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import {
   getStudentSubjects,
   isRecordedGrade,
+  loadStudentFocusPlans,
   saveStudentFocusPlans,
 } from "../data/studentData.js";
 
@@ -22,21 +23,6 @@ const formatFocusDate = (date) => {
   });
 };
 
-const readFocusPlans = (studentId) => {
-  try {
-    const saved = JSON.parse(localStorage.getItem(`studytrack:focus:${studentId}`) || "null");
-    const plans = Array.isArray(saved) ? saved : saved ? [saved] : [];
-    return plans
-      .filter((plan) => plan?.subject && plan?.topic && plan?.date)
-      .map((plan, index) => ({
-        ...plan,
-        id: plan.id || `legacy-${studentId}-${index}`,
-      }));
-  } catch {
-    return [];
-  }
-};
-
 export default function SmartStudyReminders({ currentStudent, streak }) {
   const subjects = getStudentSubjects(currentStudent);
   const gradeEntries = Object.entries(currentStudent.grades || {})
@@ -44,7 +30,7 @@ export default function SmartStudyReminders({ currentStudent, streak }) {
     .sort((a, b) => Number(a[1]) - Number(b[1]));
   const hasGradeData = gradeEntries.length > 0;
   const weakestSubject = gradeEntries[0]?.[0] || subjects[0] || "";
-  const [focusPlans, setFocusPlans] = useState(() => readFocusPlans(currentStudent.id));
+  const [focusPlans, setFocusPlans] = useState(() => loadStudentFocusPlans(currentStudent.id));
   const [form, setForm] = useState({
     subject: weakestSubject,
     topic: "Review key concepts",

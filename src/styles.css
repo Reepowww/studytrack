@@ -607,6 +607,18 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   }
 }
 
+.email-action-grid { margin-bottom: 0; }
+.email-preference-card .card-heading { margin-bottom: 10px; }
+.email-toggle {
+  display: inline-flex; align-items: center; gap: 10px; margin: 0;
+  color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.email-toggle input { width: 17px; height: 17px; margin: 0; accent-color: var(--accent); }
+.email-data-summary, .email-delivery-status { margin: 0 0 12px; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.email-data-summary b { color: var(--text); }
+.email-warning { color: #fde68a; font-size: 12px; margin: 9px 0; }
+.saved-focus .btn-secondary-light { flex-shrink: 0; }
+
 .auth-switch {
   margin: 20px 0 0;
   color: var(--muted);

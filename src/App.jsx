@@ -11,6 +11,7 @@ import Analytics from "./pages/Analytics.jsx";
 import Recommendations from "./pages/Recommendations.jsx";
 import About from "./pages/About.jsx";
 import Account from "./pages/Account.jsx";
+import EmailSettings from "./pages/EmailSettings.jsx";
 import { createAuthenticatedStudent } from "./data/authProfile.js";
 import {
   completeStudentOnboarding,
@@ -46,6 +47,7 @@ const PAGES = {
   recommendations: Recommendations,
   about: About,
   account: Account,
+  email: EmailSettings,
 };
 
 const getStudentTargets = (student) => {
@@ -480,6 +482,7 @@ export default function App() {
     authProvider,
     onLogout: handleLogout,
     onReplayOnboarding: replayOnboarding,
+    canSendEmail: authProvider === "supabase",
   };
 
   return (

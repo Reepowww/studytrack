@@ -8,6 +8,7 @@ import {
   getStudentSubjects,
   hasRecordedSubjectData,
   isValidTargetGrade,
+  loadStudentFocusPlans,
   loadStudentSettings,
   loadStudentOnboarding,
   moveSavedFocusPlans,
@@ -147,6 +148,30 @@ test("renaming a subject also preserves its saved study-focus plans", () => {
     "Advanced Algebra",
     "Writing",
   ]);
+});
+
+test("saved focus plans load using existing data shapes and ignore malformed entries", () => {
+  const values = new Map([["studytrack:focus:student-1", JSON.stringify([
+    { subject: "Math", topic: "Practice", date: "2026-11-07" },
+    { subject: "", topic: "Missing subject", date: "2026-11-07" },
+    { subject: "Art", topic: "Review" },
+  ])]]);
+  const originalStorage = globalThis.localStorage;
+  globalThis.localStorage = { getItem: (key) => values.get(key) ?? null };
+
+  try {
+    assert.deepEqual(loadStudentFocusPlans("student-1"), [
+      {
+        subject: "Math",
+        topic: "Practice",
+        date: "2026-11-07",
+        id: "legacy-student-1-0",
+      },
+    ]);
+  } finally {
+    if (originalStorage === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = originalStorage;
+  }
 });
 
 test("deleting a subject removes only its saved study-focus plans after confirmation", () => {

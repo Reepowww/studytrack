@@ -4,6 +4,7 @@ const NAV = [
   { id: "performance", label: "Academic Performance", icon: "◎" },
   { id: "analytics", label: "Analytics", icon: "⌁" },
   { id: "recommendations", label: "Recommendations", icon: "✦" },
+  { id: "email", label: "Email Reminders", icon: "✉" },
   { id: "about", label: "About StudyTrack", icon: "i" },
   { id: "account", label: "Account", icon: "◉" },
 ];

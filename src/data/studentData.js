@@ -384,6 +384,21 @@ export const saveStudentFocusPlans = (studentId, plans) => {
   return true;
 };
 
+export const loadStudentFocusPlans = (studentId) => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(`studytrack:focus:${studentId}`) || "null");
+    const plans = Array.isArray(saved) ? saved : saved ? [saved] : [];
+    return plans
+      .filter((plan) => plan?.subject && plan?.topic && plan?.date)
+      .map((plan, index) => ({
+        ...plan,
+        id: plan.id || `legacy-${studentId}-${index}`,
+      }));
+  } catch {
+    return [];
+  }
+};
+
 export const moveSavedFocusPlans = (studentId, oldName, newName) => {
   try {
     const key = `studytrack:focus:${studentId}`;
