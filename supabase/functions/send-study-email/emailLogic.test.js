@@ -2,6 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   createAcademicEmail,
+  describeProviderNetworkFailure,
+  describeProviderRejection,
+  normalizeApiKey,
   normalizeAcademicRows,
   parseAllowedOrigins,
   requiresReminderOptIn,
@@ -98,4 +101,45 @@ test("study reminders require opt-in while the explicit test message does not", 
     assert.equal(requiresReminderOptIn(type), true);
   }
   assert.equal(requiresReminderOptIn("test"), false);
+});
+
+test("network failure on a test email does not mention a reserved claim", () => {
+  const failure = describeProviderNetworkFailure(new TypeError("fetch failed"), false);
+  assert.equal(failure.code, "provider_unreachable");
+  assert.doesNotMatch(failure.error, /10-day/);
+});
+
+test("provider timeouts mention a reserved claim only when one exists", () => {
+  const failure = describeProviderNetworkFailure(
+    Object.assign(new Error("timed out"), { name: "TimeoutError" }),
+    true,
+  );
+  assert.equal(failure.code, "provider_timeout");
+  assert.match(failure.error, /10-day claim remains reserved/);
+});
+
+test("provider rejection omits Resend's free-text message and validates error names", () => {
+  const rejection = describeProviderRejection(403, {
+    name: "validation_error",
+    message: "Account owner owner@example.com must verify the sender.",
+  });
+  assert.equal(rejection.providerStatus, 403);
+  assert.equal(rejection.providerError, "validation_error");
+  assert.doesNotMatch(JSON.stringify(rejection), /owner@example\.com/);
+  assert.equal(describeProviderRejection(403, { name: "INVALID_NAME" }).providerError, "unknown_error");
+  assert.equal(describeProviderRejection(403, { name: "bad name" }).providerError, "unknown_error");
+});
+
+test("API keys are trimmed and reject unusable formats", () => {
+  assert.equal(normalizeApiKey("  re_12345678\r\n"), "re_12345678");
+  for (const value of [
+    '"re_12345678"',
+    "'re_12345678'",
+    "re_1234 5678",
+    "re_12345é",
+    "",
+    undefined,
+  ]) {
+    assert.equal(normalizeApiKey(value), null);
+  }
 });

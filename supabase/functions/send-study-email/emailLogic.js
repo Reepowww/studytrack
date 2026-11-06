@@ -152,3 +152,43 @@ export const parseAllowedOrigins = (value) => {
     }
   }))];
 };
+
+export const normalizeApiKey = (value) => {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return /^[\x21-\x7e]{8,}$/.test(trimmed) && !/["']/.test(trimmed) ? trimmed : null;
+};
+
+export const describeProviderNetworkFailure = (error, claimReserved) => {
+  const timedOut = error && typeof error === "object"
+    && ["TimeoutError", "AbortError"].includes(error.name);
+  return {
+    code: timedOut ? "provider_timeout" : "provider_unreachable",
+    error: `${timedOut
+      ? "The email provider did not respond within 20 seconds."
+      : "The server could not complete the request to the email provider."}${
+      claimReserved
+        ? " A 10-day claim remains reserved temporarily to avoid duplicate sends."
+        : ""
+    }`,
+  };
+};
+
+export const describeProviderRejection = (status, body) => {
+  const providerError = typeof body?.name === "string" && /^[a-z_]{1,64}$/.test(body.name)
+    ? body.name
+    : "unknown_error";
+  const hints = {
+    validation_error: "Check the sender address. The testing sender onboarding@resend.dev only delivers to the Resend account owner's email; an invalid sender address can also cause this error.",
+    invalid_api_key: "Check the RESEND_API_KEY secret and enter a valid Resend API key.",
+    missing_api_key: "Configure the RESEND_API_KEY secret with a valid Resend API key.",
+    restricted_api_key: "Use a Resend API key with permission to send emails.",
+    rate_limit_exceeded: "Resend is rate limiting email requests. Please wait before trying again.",
+  };
+  return {
+    code: "provider_rejected",
+    providerStatus: status,
+    providerError,
+    error: `${hints[providerError] || "Resend did not accept the email."} (Resend ${status}: ${providerError})`,
+  };
+};

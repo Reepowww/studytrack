@@ -1,6 +1,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   createAcademicEmail,
+  describeProviderNetworkFailure,
+  describeProviderRejection,
+  normalizeApiKey,
   normalizeAcademicRows,
   parseAllowedOrigins,
   requiresReminderOptIn,
@@ -107,8 +110,16 @@ const main = async (request: Request) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  const resendApiKey = Deno.env.get("RESEND_API_KEY");
+  const rawResendApiKey = Deno.env.get("RESEND_API_KEY");
+  const resendApiKey = normalizeApiKey(rawResendApiKey);
   const from = Deno.env.get("STUDYTRACK_FROM_EMAIL") || "StudyTrack <onboarding@resend.dev>";
+  if (rawResendApiKey !== undefined && resendApiKey === null) {
+    console.error("StudyTrack email function has a malformed RESEND_API_KEY secret.");
+    return response({
+      error: "The RESEND_API_KEY secret has an unusable format. Re-enter it without quotes or spaces.",
+      code: "api_key_malformed",
+    }, 500, corsHeaders);
+  }
   if (!supabaseUrl || !supabaseAnonKey || !serviceRoleKey || !resendApiKey
     || from.length > 254 || /[\r\n]/.test(from)) {
     console.error("StudyTrack email function is missing valid server configuration.");
@@ -345,13 +356,14 @@ const main = async (request: Request) => {
       }),
     });
   } catch (error) {
-    console.error("StudyTrack could not confirm a response from Resend.", error);
-    return response({
-      error: "The email provider response could not be confirmed. A 10-day claim remains reserved temporarily to avoid duplicate sends.",
-    }, 502, corsHeaders);
+    const failure = describeProviderNetworkFailure(error, Boolean(claimToken));
+    const errorName = error instanceof Error ? error.name : "UnknownError";
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(failure.code, `${errorName}: ${errorMessage}`);
+    return response(failure, 502, corsHeaders);
   }
 
-  let providerResult: { id?: unknown; message?: unknown } | null = null;
+  let providerResult: { id?: unknown; message?: unknown; name?: unknown } | null = null;
   try {
     providerResult = await providerResponse.json();
   } catch {
@@ -362,13 +374,16 @@ const main = async (request: Request) => {
     const released = definiteRejection ? await releaseClaim() : false;
     console.error("Resend rejected the StudyTrack email.", providerResponse.status, providerResult?.message);
     return response({
-      error: "Resend did not accept the email. Check the sender configuration and try again.",
+      ...describeProviderRejection(providerResponse.status, providerResult),
       ...(claimToken && !released ? { claimRemainsReserved: true } : {}),
     }, 502, corsHeaders);
   }
   if (typeof providerResult?.id !== "string" || !providerResult.id) {
     return response({
-      error: "Resend returned an ambiguous response. A 10-day claim remains reserved temporarily to avoid duplicate sends.",
+      code: "provider_ambiguous",
+      error: `Resend returned an ambiguous response.${claimToken
+        ? " A 10-day claim remains reserved temporarily to avoid duplicate sends."
+        : ""}`,
     }, 502, corsHeaders);
   }
 
